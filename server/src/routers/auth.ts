@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as argon2 from 'argon2';
-import { publicProcedure, router } from '../trpc';
+import { publicProcedure, protectedProcedure, router } from '../trpc';
 import { mapProfile, mapDeviceSession } from '../mappers';
 import { SESSION_DAYS } from '../../../src/lib/config';
 
@@ -100,6 +100,37 @@ export const authRouter = router({
 
       await openDeviceSession(ctx.db, ctx.session, user.id, ctx.req.headers['user-agent']);
       return { profile: mapProfile(user, rgLimits, notifPrefs) };
+    }),
+
+  signOut: protectedProcedure.mutation(async ({ ctx }) => {
+    if (ctx.session.sessionId) {
+      await ctx.db.deviceSession.delete({ where: { id: ctx.session.sessionId } }).catch(() => undefined);
+    }
+    ctx.session.destroy();
+  }),
+
+  me: publicProcedure.query(async ({ ctx }) => {
+    if (!ctx.session.userId) return null;
+    return loadProfile(ctx.db, ctx.session.userId);
+  }),
+
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        fullName: z.string().min(1).optional(),
+        phone: z.string().min(1).optional(),
+        notifPrefs: z.object({ betUpdates: z.boolean(), promotions: z.boolean(), liveEvents: z.boolean() }).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.update({
+        where: { id: ctx.currentUser.id },
+        data: { fullName: input.fullName, phone: input.phone },
+      });
+      if (input.notifPrefs) {
+        await ctx.db.notificationPrefs.update({ where: { userId: user.id }, data: input.notifPrefs });
+      }
+      return loadProfile(ctx.db, user.id);
     }),
 });
 

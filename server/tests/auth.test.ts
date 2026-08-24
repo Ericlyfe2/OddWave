@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../src/db';
 import { callerWithSession } from './testContext';
+import type { SessionData } from '../src/session';
 
 beforeEach(async () => {
   await db.deviceSession.deleteMany();
@@ -103,5 +104,49 @@ describe('auth.signIn', () => {
     });
     const result = await callerWithSession().auth.signIn({ email: 'excluded@example.com', password: 'correcthorse' });
     expect(result.error).toBe('Account is under self-exclusion until further notice');
+  });
+});
+
+describe('auth.me / signOut / updateProfile', () => {
+  async function signedInCaller() {
+    const session: SessionData = {};
+    const caller = callerWithSession(session);
+    await caller.auth.signUp({
+      email: 'session-user@example.com',
+      password: 'correcthorse',
+      phone: '+233200000009',
+      fullName: 'Session User',
+    });
+    return { caller, session };
+  }
+
+  it('me returns null when signed out', async () => {
+    const result = await callerWithSession().auth.me();
+    expect(result).toBeNull();
+  });
+
+  it('me returns the current profile once signed in', async () => {
+    const { caller } = await signedInCaller();
+    const me = await caller.auth.me();
+    expect(me?.email).toBe('session-user@example.com');
+  });
+
+  it('signOut clears the session so me returns null again', async () => {
+    const { caller } = await signedInCaller();
+    await caller.auth.signOut();
+    const me = await caller.auth.me();
+    expect(me).toBeNull();
+  });
+
+  it('updateProfile updates allowed fields but ignores role/suspended', async () => {
+    const { caller } = await signedInCaller();
+    const updated = await caller.auth.updateProfile({
+      fullName: 'Renamed',
+      role: 'admin',
+      suspended: true,
+    } as never);
+    expect(updated?.fullName).toBe('Renamed');
+    expect(updated?.role).toBe('user');
+    expect(updated?.suspended).toBe(false);
   });
 });
