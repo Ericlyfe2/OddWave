@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  user
+  admin
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  phone         String
+  fullName      String
+  role          Role     @default(user)
+  createdAt     DateTime @default(now())
+  bonusBalance  Decimal  @default(0) @db.Decimal(12, 2)
+  suspended     Boolean  @default(false)
+  emailVerified Boolean  @default(false)
+  phoneVerified Boolean  @default(false)
+  claimedPromos String[] @default([])
+
+  rgLimits   RgLimits?
+  notifPrefs NotificationPrefs?
+  sessions   DeviceSession[]
+}
+
+model RgLimits {
+  userId             String    @id
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  depositLimit       Decimal?  @db.Decimal(12, 2)
+  lossLimit          Decimal?  @db.Decimal(12, 2)
+  sessionReminderMin Int?
+  selfExcludedUntil  DateTime?
+}
+
+model NotificationPrefs {
+  userId     String  @id
+  user       User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  betUpdates Boolean @default(true)
+  promotions Boolean @default(true)
+  liveEvents Boolean @default(true)
+}
+
+model DeviceSession {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  exp        DateTime
+}
