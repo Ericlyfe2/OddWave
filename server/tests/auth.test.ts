@@ -149,6 +149,20 @@ describe('auth.me / signOut / updateProfile', () => {
     expect(updated?.role).toBe('user');
     expect(updated?.suspended).toBe(false);
   });
+
+  it('updateProfile persists bonusBalance and claimedPromos', async () => {
+    const { caller } = await signedInCaller();
+    const updated = await caller.auth.updateProfile({
+      bonusBalance: 50,
+      claimedPromos: ['welcome'],
+    });
+    expect(updated?.bonusBalance).toBe(50);
+    expect(updated?.claimedPromos).toEqual(['welcome']);
+
+    const me = await caller.auth.me();
+    expect(me?.bonusBalance).toBe(50);
+    expect(me?.claimedPromos).toEqual(['welcome']);
+  });
 });
 
 describe('auth.changePassword', () => {

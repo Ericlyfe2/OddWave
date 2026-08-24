@@ -120,12 +120,19 @@ export const authRouter = router({
         fullName: z.string().min(1).optional(),
         phone: z.string().min(1).optional(),
         notifPrefs: z.object({ betUpdates: z.boolean(), promotions: z.boolean(), liveEvents: z.boolean() }).optional(),
+        bonusBalance: z.number().optional(),
+        claimedPromos: z.array(z.string()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const user = await ctx.db.user.update({
         where: { id: ctx.currentUser.id },
-        data: { fullName: input.fullName, phone: input.phone },
+        data: {
+          fullName: input.fullName,
+          phone: input.phone,
+          bonusBalance: input.bonusBalance,
+          claimedPromos: input.claimedPromos,
+        },
       });
       if (input.notifPrefs) {
         await ctx.db.notificationPrefs.update({ where: { userId: user.id }, data: input.notifPrefs });
