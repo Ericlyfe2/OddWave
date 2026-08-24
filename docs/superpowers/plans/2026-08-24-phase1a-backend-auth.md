@@ -358,6 +358,9 @@ const t = initTRPC.context<Context>().create();
 
 export const router = t.router;
 export const publicProcedure = t.procedure;
+/** `@trpc/server` v11 doesn't export this from its package root — only off the
+ *  initialized instance — so every test file imports it from here instead. */
+export const createCallerFactory = t.createCallerFactory;
 
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.session.userId) {
@@ -417,7 +420,7 @@ Run: `npm install dotenv --workspace=server`
 ```ts
 // server/tests/health.test.ts
 import { describe, it, expect } from 'vitest';
-import { createCallerFactory } from '@trpc/server';
+import { createCallerFactory } from '../src/trpc';
 import { appRouter } from '../src/routers/_app';
 import { db } from '../src/db';
 
@@ -439,8 +442,12 @@ Expected: PASS — 1 test.
 
 - [ ] **Step 9: Boot the server and verify it responds**
 
+`createHTTPServer` (the standalone adapter) mounts each procedure at its own path off the server's
+root — `/health`, not `/trpc/health`. The `/trpc` prefix only applies when tRPC is mounted as a sub-router
+of another HTTP framework (Express, Next.js), which this isn't.
+
 Run: `npm run dev --workspace=server` (leave running)
-Run in another terminal: `curl http://localhost:4000/trpc/health`
+Run in another terminal: `curl http://localhost:4000/health`
 Expected: JSON body containing `"ok":true`.
 
 - [ ] **Step 10: Commit**
@@ -521,7 +528,7 @@ in, and later read `session.sessionId` after a mutation sets it:
 
 ```ts
 // server/tests/testContext.ts
-import { createCallerFactory } from '@trpc/server';
+import { createCallerFactory } from '../src/trpc';
 import { appRouter } from '../src/routers/_app';
 import { db } from '../src/db';
 import type { SessionData } from '../src/session';
@@ -1516,7 +1523,7 @@ Expected: `Seeded demo accounts: admin@oddwave.demo, fan@oddwave.demo`
 
 Run (server already running from Task 3, Step 9):
 ```bash
-curl -c cookies.txt -X POST http://localhost:4000/trpc/auth.signIn \
+curl -c cookies.txt -X POST http://localhost:4000/auth.signIn \
   -H 'content-type: application/json' \
   -d '{"email":"fan@oddwave.demo","password":"Fan12345"}'
 ```
@@ -1557,7 +1564,7 @@ import type { AppRouter } from '../../server/src/routers/_app';
 export const trpc = createTRPCReact<AppRouter>();
 
 const linkOptions = {
-  links: [httpBatchLink({ url: '/api/trpc', fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }) })],
+  links: [httpBatchLink({ url: '/api', fetch: (input, init) => fetch(input, { ...init, credentials: 'include' }) })],
 };
 
 /** Raw client for use in Zustand stores, outside the React tree. */
@@ -1568,16 +1575,19 @@ export function trpcClientConfig() {
 }
 ```
 
-`/api/trpc` relies on the Vite dev proxy from Task 1 stripping nothing — `createHTTPServer` in `server/src/index.ts`
-answers at its own root, so the proxy target needs the same `/trpc` suffix preserved. Update `vite.config.ts`'s
-proxy entry from Task 1 to rewrite the path:
+`createHTTPServer` (the standalone adapter used in `server/src/index.ts`) mounts every procedure directly at
+its own path off the server's root — `/health`, `/auth.signIn`, and so on — there is no `/trpc` prefix (that
+convention only applies when tRPC is mounted as a sub-router of another framework, e.g. Express or Next.js,
+which this isn't; Task 3 confirmed the real path with `curl http://localhost:4000/health`). So the proxy just
+needs to strip the `/api` prefix the frontend uses and forward the rest as-is. Update `vite.config.ts`'s proxy
+entry from Task 1 to add that rewrite:
 
 ```ts
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/trpc'),
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
 ```
@@ -2131,7 +2141,7 @@ starting both:
   webServer: [
     {
       command: 'npm run dev --workspace=server',
-      url: 'http://localhost:4000/trpc/health',
+      url: 'http://localhost:4000/health',
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
