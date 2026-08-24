@@ -162,7 +162,7 @@ export function DepositScreen() {
     setProcessing(true);
     await new Promise((r) => setTimeout(r, 1200));
     try {
-      wallet.deposit(profile.id, amt, provider.id);
+      wallet.deposit(profile.id, amt, provider.id, profile.notifPrefs);
       setSuccess(true);
       toast('success', `Deposited ${money(amt)} ${CURRENCY}`);
       setTimeout(() => {

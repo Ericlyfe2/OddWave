@@ -26,7 +26,7 @@ export function claimPromotion(promoId: string): { ok: boolean; error?: string; 
     if (hasBets) return { ok: false, error: 'Welcome offer is for your first bet' };
     wallet.credit(profile.id, 0, 'bonus', `WELCOME-${promo.value}`);
     useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance + promo.value), claimedPromos: [...profile.claimedPromos, promoId] });
-    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Welcome boost claimed', body: `${promo.value} bonus stake added to your account` });
+    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Welcome boost claimed', body: `${promo.value} bonus stake added to your account` }, profile.notifPrefs);
     return { ok: true, message: `${promo.value} bonus credited` };
   }
 
@@ -38,7 +38,7 @@ export function claimPromotion(promoId: string): { ok: boolean; error?: string; 
     if (!qualifying) return { ok: false, error: 'Place a 50+ multi stake with 3+ legs first' };
     wallet.credit(profile.id, 0, 'bonus', `FREEBET-${promo.id}`);
     useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance + promo.value), claimedPromos: [...profile.claimedPromos, promoId] });
-    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Free bet claimed', body: `${promo.value} free bet added` });
+    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Free bet claimed', body: `${promo.value} free bet added` }, profile.notifPrefs);
     return { ok: true, message: `${promo.value} free bet credited` };
   }
 
