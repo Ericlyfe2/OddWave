@@ -52,6 +52,21 @@ export function betslip(page: Page) {
   return page.getByRole('dialog').or(page.getByRole('complementary', { name: 'Betslip panel' })).first();
 }
 
+/**
+ * Opens a scheduled football fixture specifically. Football is the only sport
+ * whose catalog always gives a match >=2 Bet-Builder-eligible markets (Match
+ * Result, Total Goals, Both Teams To Score), so Bet Builder tests need this
+ * rather than the sport-agnostic `openScheduledMatch`.
+ */
+export async function openFootballMatch(page: Page): Promise<void> {
+  await page.goto('/sports');
+  await page.getByRole('tab', { name: 'Football' }).click();
+  await page.locator('button[aria-expanded]').first().click();
+  await page.locator('div[role="button"]').first().click();
+  await expect(page).toHaveURL(/\/match\//);
+  await expect(page.getByText('Event not found')).toHaveCount(0);
+}
+
 /** Adds the first available selection on the current match page. */
 export async function selectFirstOdds(page: Page): Promise<string> {
   const cell = page.locator('button[aria-pressed]:not([disabled])').first();
