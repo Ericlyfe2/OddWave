@@ -108,6 +108,14 @@ test.describe('notification preferences', () => {
     // actually fire along the way rather than just jumping the clock.
     await page.clock.runFor(2 * 60_000 + 20_000);
 
+    // runFor() resolves once virtual time has advanced and the sweep's timer
+    // callback has been scheduled — it does NOT wait for that callback's own
+    // async work to finish. The sweep now does a real network round trip
+    // (notifPrefsFor) before pushing the notification, so without a beat of
+    // real wall-clock time here, the immediate page.goto() below tears down
+    // the page mid-fetch and the notification never gets written.
+    await page.waitForTimeout(500);
+
     await page.goto('/notifications');
     await expect(page.getByRole('main').getByText('Withdrawal approved')).toBeVisible({ timeout: 10_000 });
 

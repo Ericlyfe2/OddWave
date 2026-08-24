@@ -233,6 +233,27 @@ describe('session management', () => {
     expect(await caller.auth.listSessions()).toHaveLength(1);
     expect(await caller.auth.me()).not.toBeNull();
   });
+
+  it('a revoked session stops working immediately, not just once its cookie eventually expires', async () => {
+    // Regression: the session cookie is a self-contained signed blob valid for
+    // its own 30-day lifetime independent of the database — revoking a device
+    // only used to delete its DeviceSession row, with nothing checking that
+    // row's continued existence on later requests, so a "revoked" device kept
+    // working (me, and every protectedProcedure call) until its cookie
+    // naturally expired.
+    const { caller } = await signedInCaller();
+    const otherSession: SessionData = {};
+    const otherCaller = callerWithSession(otherSession);
+    await otherCaller.auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    expect(await otherCaller.auth.me()).not.toBeNull();
+
+    await caller.auth.revokeOtherSessions();
+
+    expect(await otherCaller.auth.me()).toBeNull();
+    await expect(otherCaller.auth.changePassword({ currentPassword: 'x', newPassword: 'y' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+  });
 });
 
 describe('password reset', () => {

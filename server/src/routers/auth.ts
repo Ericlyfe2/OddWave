@@ -2,7 +2,12 @@ import { z } from 'zod';
 import * as argon2 from 'argon2';
 import { publicProcedure, protectedProcedure, router } from '../trpc';
 import { mapProfile, mapDeviceSession } from '../mappers';
-import { SESSION_DAYS } from '../../../src/lib/config';
+
+// Local to the server on purpose: the frontend's src/lib/config.ts reads
+// import.meta.env at module scope, which only exists under Vite/Vitest —
+// importing it here crashes the server the moment it's run via plain tsx
+// (i.e. `npm run dev --workspace=server`, outside any bundler transform).
+const SESSION_DAYS = 7;
 
 const SESSION_MS = SESSION_DAYS * 86400000;
 
@@ -110,7 +115,16 @@ export const authRouter = router({
   }),
 
   me: publicProcedure.query(async ({ ctx }) => {
-    if (!ctx.session.userId) return null;
+    if (!ctx.session.userId || !ctx.session.sessionId) return null;
+    // Same reasoning as protectedProcedure: the cookie alone isn't proof of a
+    // live session — a revoked-from-another-device session still decrypts
+    // fine until its own 30-day cookie lifetime runs out, but its
+    // DeviceSession row is gone the moment it's revoked.
+    const deviceSession = await ctx.db.deviceSession.findUnique({ where: { id: ctx.session.sessionId } });
+    if (!deviceSession || deviceSession.exp < new Date()) {
+      ctx.session.destroy();
+      return null;
+    }
     return loadProfile(ctx.db, ctx.session.userId);
   }),
 
