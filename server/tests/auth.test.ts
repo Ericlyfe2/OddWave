@@ -10,6 +10,18 @@ beforeEach(async () => {
   await db.user.deleteMany();
 });
 
+async function signedInCaller() {
+  const session: SessionData = {};
+  const caller = callerWithSession(session);
+  await caller.auth.signUp({
+    email: 'session-user@example.com',
+    password: 'correcthorse',
+    phone: '+233200000009',
+    fullName: 'Session User',
+  });
+  return { caller, session };
+}
+
 describe('auth.signUp', () => {
   it('creates a user and returns a profile with default limits and prefs', async () => {
     const caller = callerWithSession();
@@ -108,18 +120,6 @@ describe('auth.signIn', () => {
 });
 
 describe('auth.me / signOut / updateProfile', () => {
-  async function signedInCaller() {
-    const session: SessionData = {};
-    const caller = callerWithSession(session);
-    await caller.auth.signUp({
-      email: 'session-user@example.com',
-      password: 'correcthorse',
-      phone: '+233200000009',
-      fullName: 'Session User',
-    });
-    return { caller, session };
-  }
-
   it('me returns null when signed out', async () => {
     const result = await callerWithSession().auth.me();
     expect(result).toBeNull();
@@ -148,5 +148,75 @@ describe('auth.me / signOut / updateProfile', () => {
     expect(updated?.fullName).toBe('Renamed');
     expect(updated?.role).toBe('user');
     expect(updated?.suspended).toBe(false);
+  });
+});
+
+describe('auth.changePassword', () => {
+  it('rejects the wrong current password', async () => {
+    const { caller } = await signedInCaller();
+    const result = await caller.auth.changePassword({ currentPassword: 'wrong', newPassword: 'newenough' });
+    expect(result.error).toBe('Current password is incorrect');
+  });
+
+  it('rejects a new password under 6 characters', async () => {
+    const { caller } = await signedInCaller();
+    const result = await caller.auth.changePassword({ currentPassword: 'correcthorse', newPassword: 'abc' });
+    expect(result.error).toBe('New password must be at least 6 characters');
+  });
+
+  it('replaces the password so only the new one signs in', async () => {
+    const { caller } = await signedInCaller();
+    const result = await caller.auth.changePassword({ currentPassword: 'correcthorse', newPassword: 'newenough' });
+    expect(result.error).toBeUndefined();
+
+    const oldPw = await callerWithSession().auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    expect(oldPw.error).toBe('Incorrect email or password');
+    const newPw = await callerWithSession().auth.signIn({ email: 'session-user@example.com', password: 'newenough' });
+    expect(newPw.error).toBeUndefined();
+  });
+});
+
+describe('session management', () => {
+  it('listSessions marks the current session and includes a second device', async () => {
+    const { caller, session } = await signedInCaller();
+    const otherSession: SessionData = {};
+    await callerWithSession(otherSession).auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+
+    const sessions = await caller.auth.listSessions();
+    expect(sessions).toHaveLength(2);
+    expect(sessions.filter((s) => s.current)).toHaveLength(1);
+    expect(sessions.find((s) => s.current)?.id).toBe(session.sessionId);
+  });
+
+  it('revokeSession on another device does not sign the caller out', async () => {
+    const { caller } = await signedInCaller();
+    const otherSession: SessionData = {};
+    await callerWithSession(otherSession).auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    const otherId = otherSession.sessionId!;
+
+    const result = await caller.auth.revokeSession({ sessionId: otherId });
+    expect(result.signedOut).toBe(false);
+    expect(await caller.auth.me()).not.toBeNull();
+    expect(await caller.auth.listSessions()).toHaveLength(1);
+  });
+
+  it('revokeSession on your own current session signs you out', async () => {
+    const { caller, session } = await signedInCaller();
+    const result = await caller.auth.revokeSession({ sessionId: session.sessionId! });
+    expect(result.signedOut).toBe(true);
+    expect(await caller.auth.me()).toBeNull();
+  });
+
+  it('revokeOtherSessions leaves only the caller signed in', async () => {
+    const { caller } = await signedInCaller();
+    for (let i = 0; i < 2; i++) {
+      await callerWithSession({}).auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    }
+    expect(await caller.auth.listSessions()).toHaveLength(3);
+
+    const removed = await caller.auth.revokeOtherSessions();
+    expect(removed).toBe(2);
+    expect(await caller.auth.listSessions()).toHaveLength(1);
+    expect(await caller.auth.me()).not.toBeNull();
   });
 });

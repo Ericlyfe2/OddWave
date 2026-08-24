@@ -132,6 +132,47 @@ export const authRouter = router({
       }
       return loadProfile(ctx.db, user.id);
     }),
+
+  changePassword: protectedProcedure
+    .input(z.object({ currentPassword: z.string(), newPassword: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const valid = await argon2.verify(ctx.currentUser.passwordHash, input.currentPassword).catch(() => false);
+      if (!valid) return { error: 'Current password is incorrect' };
+      if (input.newPassword.length < 6) return { error: 'New password must be at least 6 characters' };
+      if (input.newPassword === input.currentPassword) return { error: 'New password must be different' };
+
+      const passwordHash = await argon2.hash(input.newPassword);
+      await ctx.db.user.update({ where: { id: ctx.currentUser.id }, data: { passwordHash } });
+      return {};
+    }),
+
+  listSessions: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db.deviceSession.findMany({
+      where: { userId: ctx.currentUser.id, exp: { gt: new Date() } },
+      orderBy: { lastSeenAt: 'desc' },
+    });
+    return rows.map((row) => ({ ...mapDeviceSession(row), current: row.id === ctx.session.sessionId }));
+  }),
+
+  revokeSession: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.deviceSession
+        .delete({ where: { id: input.sessionId, userId: ctx.currentUser.id } })
+        .catch(() => undefined);
+      if (ctx.session.sessionId === input.sessionId) {
+        ctx.session.destroy();
+        return { signedOut: true };
+      }
+      return { signedOut: false };
+    }),
+
+  revokeOtherSessions: protectedProcedure.mutation(async ({ ctx }) => {
+    const { count } = await ctx.db.deviceSession.deleteMany({
+      where: { userId: ctx.currentUser.id, id: { not: ctx.session.sessionId } },
+    });
+    return count;
+  }),
 });
 
 export { loadProfile };
