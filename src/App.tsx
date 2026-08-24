@@ -2,7 +2,7 @@ import { Component, lazy, Suspense, useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
-import { Header, BottomNav, MobileDrawer, DesktopSidenav } from '@/components/layout';
+import { Header, BottomNav, MobileDrawer, DesktopSidenav, Footer, StickySignupBar } from '@/components/layout';
 import { BetslipSheet, DesktopBetslip } from '@/components/Betslip';
 import { FloatingBetslipButton } from '@/components/layout';
 import { useUI } from '@/store/ui';
@@ -35,6 +35,8 @@ const SecurityScreen = lazy(() => import('@/screens/SecurityScreen').then((m) =>
 const SettingsScreen = lazy(() => import('@/screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })));
 const ResponsibleGamingScreen = lazy(() => import('@/screens/ResponsibleGamingScreen').then((m) => ({ default: m.ResponsibleGamingScreen })));
 const HelpScreen = lazy(() => import('@/screens/HelpScreen').then((m) => ({ default: m.HelpScreen })));
+const ThankYouScreen = lazy(() => import('@/screens/ThankYouScreen').then((m) => ({ default: m.ThankYouScreen })));
+const NotFoundScreen = lazy(() => import('@/screens/NotFoundScreen').then((m) => ({ default: m.NotFoundScreen })));
 const AdminOverview = lazy(() => import('@/screens/AdminOverview').then((m) => ({ default: m.AdminOverview })));
 const AdminOps = lazy(() => import('@/screens/AdminOps').then((m) => ({ default: m.AdminOps })));
 
@@ -128,9 +130,13 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-ink-700">
       <Header />
       <DesktopSidenav />
-      <main className={clsx('lg:pl-60 lg:pr-[356px] lg:pb-6 min-h-screen', hasSelections ? 'pb-32' : 'pb-24')}>{children}</main>
+      <main className={clsx('lg:pl-60 lg:pr-[356px] flex flex-col min-h-screen', hasSelections ? 'pb-32' : 'pb-24 lg:pb-0')}>
+        <div className="flex-1">{children}</div>
+        <Footer />
+      </main>
       <BottomNav />
       <MobileDrawer />
+      <StickySignupBar />
       <FloatingBetslipButton />
       <DesktopBetslip />
       <BetslipSheet />
@@ -169,6 +175,7 @@ export default function App() {
               <Route path="/responsible-gaming" element={<ResponsibleGamingScreen />} />
               <Route path="/help" element={<HelpScreen />} />
               <Route path="/auth" element={<AuthScreen />} />
+              <Route path="/welcome" element={<RequireAuth><ThankYouScreen /></RequireAuth>} />
               <Route path="/bets" element={<RequireAuth><BetsScreen /></RequireAuth>} />
               <Route path="/notifications" element={<RequireAuth><NotificationsScreen /></RequireAuth>} />
               <Route path="/account" element={<RequireAuth><AccountScreen /></RequireAuth>} />
@@ -188,7 +195,7 @@ export default function App() {
                   </RequireAdmin>
                 }
               />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFoundScreen />} />
             </Routes>
           </Suspense>
         </Shell>

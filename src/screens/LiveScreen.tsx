@@ -6,12 +6,14 @@ import { SportTabs, ListSkeleton } from '@/components/pieces';
 import { SPORTS } from '@/lib/catalog';
 import { useMemo, useState } from 'react';
 import { EmptyState } from '@/components/ui';
+import { useDocumentMeta } from '@/lib/seo';
 
 export function LiveScreen() {
   const navigate = useNavigate();
   const [sport, setSport] = useState<string | null>(null);
   const live = useLiveMatches();
   const loaded = useMatches((s) => s.loaded);
+  useDocumentMeta('Live Betting', 'Live odds and in-play betting on OddWave — football, basketball, tennis and more, updated in real time.');
 
   const filtered = useMemo(() => live.filter((m) => !sport || m.sportId === sport).sort((a, b) => (b.minute ?? 0) - (a.minute ?? 0)), [live, sport]);
 

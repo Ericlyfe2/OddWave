@@ -6,10 +6,13 @@ import { useMatches } from '@/store/matches';
 import type { Match, SlipItem } from '@/lib/types';
 import { OddsCell } from '@/components/OddsCell';
 import { Accordion, Badge, EmptyState, Button } from '@/components/ui';
+import { Breadcrumbs } from '@/components/pieces';
 import { useSlip } from '@/store/slip';
 import { useFavorites } from '@/store/favorites';
 import { useUI } from '@/store/ui';
 import { dayLabel, timeLabel, initials, money } from '@/lib/format';
+import { sportName } from '@/lib/catalog';
+import { useDocumentMeta } from '@/lib/seo';
 
 export function MatchScreen() {
   const navigate = useNavigate();
@@ -42,6 +45,11 @@ export function MatchScreen() {
       />
     );
   }
+
+  useDocumentMeta(
+    `${match.home.name} vs ${match.away.name}`,
+    `${match.home.name} vs ${match.away.name} — ${match.leagueName}. Live odds and betting markets on OddWave.`
+  );
 
   const isFav = favorites.isFav('events', match.id);
   const live = match.status === 'live';
@@ -108,6 +116,15 @@ export function MatchScreen() {
           </button>
         </div>
       </div>
+
+      <Breadcrumbs
+        items={[
+          { label: 'Home', to: '/' },
+          { label: sportName(match.sportId), to: `/sport/${match.sportId}` },
+          { label: match.leagueName, to: `/league/${match.leagueId}` },
+          { label: `${match.home.short} vs ${match.away.short}` },
+        ]}
+      />
 
       {/* Event header */}
       <div className="px-4 pt-4 pb-3 bg-gradient-to-b from-ink-700 to-transparent">

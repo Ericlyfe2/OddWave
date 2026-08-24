@@ -5,6 +5,7 @@ import { Mail, Lock, Phone, User, Eye, EyeOff, Loader2, AlertCircle, KeyRound, I
 import { useAuth } from '@/store/auth';
 import { useUI } from '@/store/ui';
 import { DEMO_MODE } from '@/lib/config';
+import { useDocumentMeta } from '@/lib/seo';
 
 export function AuthScreen() {
   const { signIn, signUp, requestPasswordReset, resetPassword } = useAuth();
@@ -12,6 +13,7 @@ export function AuthScreen() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>(params.get('mode') === 'signup' ? 'signup' : 'login');
+  useDocumentMeta(mode === 'signup' ? 'Sign Up' : 'Log In', mode === 'signup' ? 'Create your free OddWave account and claim your welcome bonus.' : 'Log in to OddWave to place bets and manage your account.');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -41,7 +43,7 @@ export function AuthScreen() {
       setLoading(false);
       if (err) return setError(err);
       toast('success', 'Account created — welcome to OddWave!');
-      navigate('/');
+      navigate('/welcome');
     } else {
       if (!showResetCodeHint) {
         setLoading(true);

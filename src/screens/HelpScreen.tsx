@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ChevronDown, MailQuestion, MessageCircle } from 'lucide-react';
+import { ChevronDown, MailQuestion, MessageCircle, Clock } from 'lucide-react';
 import { PageTitle } from '@/components/pieces';
 import { InfoNote } from '@/components/ui';
+import { useDocumentMeta } from '@/lib/seo';
 
 const FAQS: Array<{ q: string; a: string }> = [
   {
@@ -40,10 +41,17 @@ const FAQS: Array<{ q: string; a: string }> = [
 
 export function HelpScreen() {
   const [openIdx, setOpenIdx] = useState<number | null>(0);
+  useDocumentMeta('Help Centre', 'Answers to common OddWave questions — betting, cash out, withdrawals, and responsible gaming — plus how to reach support.');
 
   return (
     <div className="pb-4">
       <PageTitle title="Help Center" />
+      <div className="mx-3 flex items-center gap-2 rounded-xl border border-success-500/30 bg-success-500/10 px-3 py-2.5">
+        <Clock className="w-4 h-4 text-success-500 shrink-0" />
+        <p className="text-[11px] text-ink-100">
+          <span className="font-bold">Our promise:</span> support replies within 5 minutes, and withdrawals are processed within 2 minutes.
+        </p>
+      </div>
       <div className="px-3 space-y-2">
         {FAQS.map((f, i) => (
           <div key={i} className="rounded-xl border border-ink-500/40 bg-ink-600 overflow-hidden">

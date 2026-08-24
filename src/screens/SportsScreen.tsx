@@ -6,10 +6,11 @@ import { getLeagues } from '@/lib/dataGen';
 import { SPORTS, sportName } from '@/lib/catalog';
 import type { Match } from '@/lib/types';
 import { MatchCard } from '@/components/MatchCard';
-import { SportTabs, PageTitle } from '@/components/pieces';
+import { SportTabs, PageTitle, Breadcrumbs } from '@/components/pieces';
 import { dayLabel, timeLabel } from '@/lib/format';
 import { clsx } from 'clsx';
 import { useFavorites } from '@/store/favorites';
+import { useDocumentMeta } from '@/lib/seo';
 
 export function useGroupedMatches(sportId: string | null): Array<{ leagueId: string; leagueName: string; country: string; sportId: string; matches: Match[] }> {
   const all = useMatches((s) => s.byId);
@@ -84,6 +85,13 @@ export function SportsScreen() {
     ? groups.filter((g) => g.leagueName.toLowerCase().includes(query.toLowerCase()) || g.country.toLowerCase().includes(query.toLowerCase()))
     : groups;
 
+  useDocumentMeta(
+    sport ? sportName(sport) : 'All Sports',
+    sport
+      ? `Bet on ${sportName(sport)} — live odds, fixtures, and leagues on OddWave.`
+      : 'Browse every sport on OddWave — football, basketball, tennis, and more, with live odds.'
+  );
+
   return (
     <div className="pb-4">
       <SportTabs sports={SPORTS} selected={sport} onSelect={(id) => setSport(id)} />
@@ -149,8 +157,17 @@ export function LeagueScreen() {
     byDay.set(label, [...(byDay.get(label) || []), m]);
   }
 
+  useDocumentMeta(league.name, `${league.name} fixtures and odds — ${league.country}. Bet on ${league.name} matches with live odds on OddWave.`);
+
   return (
     <div className="pb-4">
+      <Breadcrumbs
+        items={[
+          { label: 'Home', to: '/' },
+          { label: sportName(league.sportId), to: `/sport/${league.sportId}` },
+          { label: league.name },
+        ]}
+      />
       <PageTitle
         title={league.name}
         right={

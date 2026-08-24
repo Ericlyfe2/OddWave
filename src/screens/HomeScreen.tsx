@@ -1,14 +1,22 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Radio, Star, Flame, Megaphone, Zap } from 'lucide-react';
+import { ChevronRight, Radio, Star, Flame, Megaphone, Zap, Trophy, ArrowRight } from 'lucide-react';
 import { useMatches, useLiveMatches } from '@/store/matches';
 import { getLeagues } from '@/lib/dataGen';
 import { MatchCard } from '@/components/MatchCard';
 import { MatchCardSkeleton } from '@/components/ui';
 import { SectionHeader } from '@/components/pieces';
 import { usePromotions } from '@/store/promotions';
-import { dayLabel, timeLabel } from '@/lib/format';
+import { dayLabel, timeLabel, money } from '@/lib/format';
 import { sportName } from '@/lib/catalog';
+import { useAuth } from '@/store/auth';
+import { useDocumentMeta } from '@/lib/seo';
+
+const BIG_WINS = [
+  { name: 'Kwesi A.', game: '5-fold Multi · Ghana Premier League', payout: 4280 },
+  { name: 'Abena O.', game: 'Live Cashout · Champions Cup', payout: 1960 },
+  { name: 'Yaw M.', game: 'System Bet · Basketball', payout: 3115 },
+];
 
 export function HomeScreen() {
   const navigate = useNavigate();
@@ -17,6 +25,9 @@ export function HomeScreen() {
   const live = useLiveMatches();
   const all = useMatches((s) => s.byId);
   const loaded = useMatches((s) => s.loaded);
+  const profile = useAuth((s) => s.profile);
+
+  useDocumentMeta('Sports Betting Odds & Live Wagering', 'OddWave — bet on football, basketball, tennis and more. Live odds, cashout, virtuals and instant games.');
   // .filter() (inside activeList()) allocates a new array every call; selecting
   // the stable `promotions` array and filtering in useMemo keeps the snapshot
   // referentially stable between real store updates (see matches.ts for the
@@ -57,6 +68,22 @@ export function HomeScreen() {
 
   return (
     <div className="pb-4">
+      {!profile && (
+        <div className="mx-3 mt-3 rounded-2xl bg-gradient-to-br from-primary-600 to-primary-800 px-5 py-5 text-white relative overflow-hidden">
+          <div className="relative">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-white/80">100% Welcome Boost</p>
+            <h1 className="text-xl font-extrabold mt-1 leading-tight">Sign up and get a bonus on your first bet</h1>
+            <p className="text-xs text-white/85 mt-1.5 max-w-[38ch]">Live odds on football, basketball, tennis and more — plus instant cashout.</p>
+            <button
+              onClick={() => navigate('/auth?mode=signup')}
+              className="mt-4 inline-flex items-center gap-1.5 bg-white text-primary-700 font-extrabold text-sm rounded-xl px-5 py-2.5 active:scale-[0.98] transition-transform"
+            >
+              Sign Up Free <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <SectionHeader title="Highlights" icon={<Flame className="w-4 h-4 text-secondary-400" />} />
       <div className="scroll-x gap-2 px-3 pb-1">
         {featured.map((m) => (
@@ -111,6 +138,17 @@ export function HomeScreen() {
             <div className="text-sm font-extrabold text-ink-50">{p.title}</div>
             <div className="text-[11px] text-ink-200 mt-1 line-clamp-2">{p.blurb}</div>
           </button>
+        ))}
+      </div>
+
+      <SectionHeader title="Big Wins This Week" icon={<Trophy className="w-4 h-4 text-secondary-400" />} />
+      <div className="scroll-x gap-2 px-3 pb-1">
+        {BIG_WINS.map((w) => (
+          <div key={w.name} className="shrink-0 w-[210px] bg-ink-600 rounded-xl p-3.5">
+            <div className="text-[11px] text-ink-300 truncate">{w.game}</div>
+            <div className="text-sm font-bold text-ink-50 mt-1">{w.name}</div>
+            <div className="text-lg font-extrabold text-success-500 mt-1 tnum">{money(w.payout, true)}</div>
+          </div>
         ))}
       </div>
 

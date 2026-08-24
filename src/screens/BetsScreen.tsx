@@ -10,6 +10,7 @@ import { Tabs, EmptyState, Button } from '@/components/ui';
 import { PageTitle } from '@/components/pieces';
 import { money, dateTimeLabel } from '@/lib/format';
 import { BetCard, SettledList } from './BetPieces';
+import { useDocumentMeta } from '@/lib/seo';
 
 type BetsTab = 'open' | 'settled' | 'transactions';
 
@@ -89,6 +90,7 @@ export function BetsScreen() {
   const profile = useAuth((s) => s.profile);
   const betsCount = useBets((s) => s.bets.filter((b) => b.userId === profile?.id && b.status === 'open').length);
   const [tab, setTab] = useState<BetsTab>('open');
+  useDocumentMeta('My Bets');
 
   if (!profile) {
     return (

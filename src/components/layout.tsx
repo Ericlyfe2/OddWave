@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   Home, Trophy, Radio, User, Search, Wallet, Menu, X, Plus,
@@ -26,6 +26,71 @@ export function BrandMark({ size = 28 }: { size?: number }) {
         Odd<span className="opacity-80">Wave</span>
       </span>
     </span>
+  );
+}
+
+const FOOTER_LINKS: Array<{ heading: string; links: Array<{ to: string; label: string }> }> = [
+  {
+    heading: 'Sports',
+    links: [
+      { to: '/sports', label: 'All Sports' },
+      { to: '/live', label: 'Live Betting' },
+      { to: '/countries', label: 'Countries' },
+      { to: '/today', label: "Today's Matches" },
+      { to: '/virtuals', label: 'Virtuals & Games' },
+    ],
+  },
+  {
+    heading: 'Account',
+    links: [
+      { to: '/promotions', label: 'Promotions' },
+      { to: '/account/deposit', label: 'Deposit' },
+      { to: '/bets', label: 'My Bets' },
+      { to: '/favorites', label: 'Favorites' },
+    ],
+  },
+  {
+    heading: 'Support',
+    links: [
+      { to: '/help', label: 'Help Centre' },
+      { to: '/responsible-gaming', label: 'Responsible Gaming' },
+      { to: '/results', label: 'Results' },
+    ],
+  },
+];
+
+export function Footer() {
+  return (
+    <footer className="hidden lg:block border-t border-ink-500/40 bg-ink-800/60 mt-8">
+      <div className="max-w-[1100px] mx-auto px-6 py-8 grid grid-cols-4 gap-8">
+        <div>
+          <BrandMark size={26} />
+          <p className="text-[11px] text-ink-300 mt-3 max-w-[220px]">
+            Licensed sports betting and live wagering. Bet responsibly — 18+.
+          </p>
+          <p className="text-[11px] text-ink-400 mt-3">
+            Withdrawals processed in under 2 minutes.
+          </p>
+        </div>
+        {FOOTER_LINKS.map((group) => (
+          <div key={group.heading}>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-ink-300 mb-2.5">{group.heading}</div>
+            <ul className="space-y-2">
+              {group.links.map((l) => (
+                <li key={l.to}>
+                  <Link to={l.to} className="text-[12px] text-ink-200 hover:text-primary-600 transition-colors">
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-ink-500/30 px-6 py-3 text-[10px] text-ink-400">
+        © {new Date().getFullYear()} OddWave. All rights reserved.
+      </div>
+    </footer>
   );
 }
 
@@ -323,6 +388,27 @@ export function DesktopSidenav() {
     <aside className="hidden lg:block fixed left-0 top-14 bottom-0 w-60 bg-ink-700 border-r border-ink-500/40 z-header overflow-hidden">
       <SideNavContent />
     </aside>
+  );
+}
+
+/** A slim signup nudge pinned above the bottom nav for signed-out visitors —
+ *  hidden once there's a betslip selection so it never stacks on top of
+ *  FloatingBetslipButton, which occupies the same spot and matters more. */
+export function StickySignupBar() {
+  const profile = useAuth((s) => s.profile);
+  const hasSelections = useSlip((s) => s.items.length > 0);
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  if (profile || hasSelections || pathname.startsWith('/auth')) return null;
+  return (
+    <button
+      onClick={() => navigate('/auth?mode=signup')}
+      className="lg:hidden fixed left-3 right-3 bottom-[72px] z-nav bg-secondary-500 text-ink-900 rounded-xl px-4 py-2.5 flex items-center justify-between shadow-float animate-slide-up active:scale-[0.99] transition-transform"
+    >
+      <span className="text-sm font-extrabold">Get your welcome bonus</span>
+      <span className="text-xs font-bold underline underline-offset-2">Sign Up</span>
+    </button>
   );
 }
 

@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /account
+Disallow: /account/deposit
+Disallow: /account/withdraw
+Disallow: /account/transactions
+Disallow: /account/security
+Disallow: /bets
+Disallow: /notifications
+Disallow: /settings
+Disallow: /admin

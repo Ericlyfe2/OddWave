@@ -1,6 +1,33 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Skeleton, MatchCardSkeleton } from './ui';
+
+/** A trail like Home / Football / Ghana Premier League. The last crumb is the
+ *  current page — plain text, not a link, since navigating to it is a no-op. */
+export function Breadcrumbs({ items }: { items: Array<{ label: string; to?: string }> }) {
+  return (
+    <nav aria-label="Breadcrumb" className="px-3 pt-3 pb-1">
+      <ol className="flex items-center flex-wrap gap-1 text-[11px] text-ink-300">
+        {items.map((item, i) => (
+          <li key={i} className="flex items-center gap-1 min-w-0">
+            {i > 0 && <ChevronRight className="w-3 h-3 shrink-0 text-ink-400" aria-hidden />}
+            {item.to ? (
+              <Link to={item.to} className="link-action truncate hover:text-primary-600 transition-colors">
+                {item.label}
+              </Link>
+            ) : (
+              <span className="truncate text-ink-100 font-semibold" aria-current="page">
+                {item.label}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
 
 export function SectionHeader({ title, subtitle, icon, action }: { title: string; subtitle?: string; icon?: ReactNode; action?: ReactNode }) {
   return (

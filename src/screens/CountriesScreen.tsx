@@ -8,6 +8,7 @@ import { SPORTS, sportName } from '@/lib/catalog';
 import { SportTabs, PageTitle } from '@/components/pieces';
 import { EmptyState } from '@/components/ui';
 import { useFavorites } from '@/store/favorites';
+import { useDocumentMeta } from '@/lib/seo';
 
 interface CountryGroup {
   country: string;
@@ -73,6 +74,8 @@ export function CountriesScreen() {
 
   const groups = useCountryGroups(sport, query);
   const totalLeagues = groups.reduce((sum, g) => sum + g.leagues.length, 0);
+
+  useDocumentMeta('Countries', 'Browse OddWave leagues and fixtures by country — find odds for your local competitions.');
 
   const toggle = (country: string) => {
     setOpen((prev) => {

@@ -11,6 +11,7 @@ import { useUI } from '@/store/ui';
 import { useMatches } from '@/store/matches';
 import { MatchCard } from '@/components/MatchCard';
 import { Button, EmptyState, InfoNote } from '@/components/ui';
+import { useDocumentMeta } from '@/lib/seo';
 import { PageTitle } from '@/components/pieces';
 import { dateTimeLabel } from '@/lib/format';
 
@@ -27,6 +28,7 @@ export function PromotionsScreen() {
   const toast = useUI((s) => s.toast);
   const allPromotions = usePromotions((s) => s.promotions);
   const promotions = useMemo(() => allPromotions.filter((p) => p.active), [allPromotions]);
+  useDocumentMeta('Promotions & Bonuses', 'OddWave promotions — welcome bonus, free bets, acca boosts and cashback offers.');
 
   const claim = (id: string) => {
     if (!profile) {
