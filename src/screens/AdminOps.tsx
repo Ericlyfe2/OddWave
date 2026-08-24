@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Check, X, UserCog, Coins, ShieldCheck, Ticket, Ban, Gift, Plus, Pencil, Trash2, EyeOff, Eye } from 'lucide-react';
-import { useAuth } from '@/store/auth';
 import { useWallet } from '@/store/wallet';
 import { useBets } from '@/store/bets';
 import { usePromotions, type PromotionInput } from '@/store/promotions';
 import type { Promotion, PromoKind } from '@/lib/types';
 import { money, timeAgoLabel } from '@/lib/format';
+import { trpc } from '@/lib/trpc';
 import { Button, EmptyState, Modal } from '@/components/ui';
 
 type Tab = 'withdrawals' | 'users' | 'bets' | 'promotions';
@@ -105,10 +105,12 @@ function WithdrawalsQueue() {
 }
 
 function UsersAdmin() {
-  const listProfiles = useAuth((s) => s.listProfiles);
-  const adminUpdateUser = useAuth((s) => s.adminUpdateUser);
+  const { data: profiles = [] } = trpc.admin.listUsers.useQuery();
+  const utils = trpc.useUtils();
+  const updateUser = trpc.admin.updateUser.useMutation({
+    onSuccess: () => utils.admin.listUsers.invalidate(),
+  });
   const wallet = useWallet();
-  const profiles = useMemo(() => listProfiles(), [listProfiles, wallet.txns]);
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [amount, setAmount] = useState('25');
 
@@ -164,12 +166,12 @@ function UsersAdmin() {
               <MiniBtn onClick={() => setAdjusting(adjusting === p.id ? null : p.id)}>
                 <Coins className="w-3 h-3" /> Adjust balance
               </MiniBtn>
-              <MiniBtn onClick={() => adminUpdateUser(p.id, { suspended: !p.suspended })}>
+              <MiniBtn onClick={() => updateUser.mutate({ userId: p.id, patch: { suspended: !p.suspended } })}>
                 <UserCog className="w-3 h-3" /> {p.suspended ? 'Unsuspend' : 'Suspend'}
               </MiniBtn>
               <MiniBtn
                 disabled={p.role === 'admin'}
-                onClick={() => adminUpdateUser(p.id, { role: p.role === 'admin' ? 'user' : 'admin' })}
+                onClick={() => updateUser.mutate({ userId: p.id, patch: { role: p.role === 'admin' ? 'user' : 'admin' } })}
               >
                 <ShieldCheck className="w-3 h-3" /> {p.role === 'admin' ? 'Revoke admin' : 'Make admin'}
               </MiniBtn>
@@ -198,8 +200,7 @@ const VOID_REASONS = ['Suspicious activity', 'Trading error', 'Duplicate bet', '
 function BetsAdmin() {
   const bets = useBets((s) => s.bets);
   const voidBet = useBets((s) => s.voidBet);
-  const listProfiles = useAuth((s) => s.listProfiles);
-  const profiles = useMemo(() => listProfiles(), [listProfiles]);
+  const { data: profiles = [] } = trpc.admin.listUsers.useQuery();
   const profileById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
 
   const open = useMemo(
