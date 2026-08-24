@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-ink-900 text-ink-50 font-sans antialiased;
+    overscroll-behavior-y: none;
+  }
+  button {
+    touch-action: manipulation;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  ::selection {
+    background: rgba(29, 100, 216, 0.22);
+  }
+  *:focus-visible {
+    outline: 2px solid theme('colors.primary.400');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .section-title {
+    @apply text-[13px] font-bold text-ink-50;
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .skeleton {
+    background: linear-gradient(90deg, #e8eef5 25%, #f4f7fb 45%, #e8eef5 65%);
+    background-size: 800px 100%;
+    @apply animate-shimmer rounded-lg;
+  }
+  /* Inline text actions ("See all", "Mark all read"): keeps the visual weight of
+     a link while giving thumbs a ~32px target, without shifting surrounding layout. */
+  .link-action {
+    @apply py-2 -my-2 px-1 -mx-1;
+  }
+  .scroll-x {
+    @apply flex overflow-x-auto no-scrollbar;
+    scroll-snap-type: x proximity;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
