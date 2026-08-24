@@ -26,7 +26,7 @@ export function ResponsibleGamingScreen() {
   // controls that act on a wallet require signing in.
   if (!profile) return <SignedOutGuidance onSignIn={() => navigate('/auth')} />;
 
-  const saveLimits = () => {
+  const saveLimits = async () => {
     setError(null);
     const dep = depositLimit === '' ? null : Number(depositLimit);
     const loss = lossLimit === '' ? null : Number(lossLimit);
@@ -35,7 +35,7 @@ export function ResponsibleGamingScreen() {
       setError('Minimum limit is 10 GH₵');
       return;
     }
-    updateProfile({
+    await updateProfile({
       rgLimits: {
         ...profile.rgLimits,
         depositLimit: dep,
@@ -111,8 +111,8 @@ export function ResponsibleGamingScreen() {
           <Button
             variant="danger"
             className="flex-1"
-            onClick={() => {
-              updateProfile({ rgLimits: { ...profile.rgLimits, selfExcludedUntil: Date.now() + 182 * 86400000 } });
+            onClick={async () => {
+              await updateProfile({ rgLimits: { ...profile.rgLimits, selfExcludedUntil: Date.now() + 182 * 86400000 } });
               setExcludeOpen(false);
               toast('info', 'Self-exclusion activated');
               navigate('/');

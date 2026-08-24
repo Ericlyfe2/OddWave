@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { KeyRound, Monitor, ShieldCheck, MailCheck, PhoneCall, Loader2, LogOut, Check } from 'lucide-react';
+import type { DeviceSession } from '@/lib/types';
 import { useAuth } from '@/store/auth';
 import { useUI } from '@/store/ui';
 import { Button, ErrorBox, InfoNote } from '@/components/ui';
@@ -106,16 +107,17 @@ function VerificationPanel() {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const start = (next: 'email' | 'phone') => {
+  const start = async (next: 'email' | 'phone') => {
     setError(null);
     setCode('');
     setChannel(next);
-    setIssued(requestVerification(next).code);
+    const result = await requestVerification(next);
+    setIssued(result.code);
   };
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!channel) return;
-    const res = confirmVerification(channel, code);
+    const res = await confirmVerification(channel, code);
     if (res.error) {
       setError(res.error);
       return;
@@ -217,11 +219,19 @@ function SessionsPanel() {
   const toast = useUI((s) => s.toast);
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Array<DeviceSession & { current: boolean }>>([]);
   const [revision, setRevision] = useState(0);
 
-  // Sessions live in storage rather than store state, so a counter drives re-reads.
-  void revision;
-  const sessions = listSessions();
+  // Sessions come from the server rather than store state, so a counter drives re-fetches.
+  useEffect(() => {
+    let cancelled = false;
+    listSessions().then((next) => {
+      if (!cancelled) setSessions(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [listSessions, revision]);
 
   const revoke = async (id: string) => {
     setBusy(id);
@@ -236,8 +246,8 @@ function SessionsPanel() {
     setRevision((n) => n + 1);
   };
 
-  const revokeOthers = () => {
-    const removed = revokeOtherSessions();
+  const revokeOthers = async () => {
+    const removed = await revokeOtherSessions();
     toast(
       removed > 0 ? 'success' : 'info',
       removed > 0 ? `${removed} other session${removed === 1 ? '' : 's'} revoked` : 'No other active sessions'
