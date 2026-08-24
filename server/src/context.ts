@@ -4,7 +4,7 @@ import { getSession } from './session';
 
 export async function createContext({ req, res }: CreateHTTPContextOptions) {
   const session = await getSession(req, res);
-  return { db, session };
+  return { db, session, req, res };
 }
 
 export type Context = Awaited<ReturnType<typeof createContext>>;

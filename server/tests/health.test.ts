@@ -8,7 +8,7 @@ const createCaller = createCallerFactory(appRouter);
 
 describe('health', () => {
   it('responds ok without touching the database', async () => {
-    const caller = createCaller({ db, session: {} as never });
+    const caller = createCaller({ db, session: {} as never, req: {} as never, res: {} as never });
     const result = await caller.health();
     expect(result).toEqual({ ok: true });
   });
