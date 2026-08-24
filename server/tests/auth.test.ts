@@ -220,3 +220,81 @@ describe('session management', () => {
     expect(await caller.auth.me()).not.toBeNull();
   });
 });
+
+describe('password reset', () => {
+  it('issues a code and accepts it once', async () => {
+    await callerWithSession().auth.signUp({
+      email: 'reset-me@example.com',
+      password: 'correcthorse',
+      phone: '+233200000009',
+      fullName: 'Reset Me',
+    });
+    const req = await callerWithSession().auth.requestPasswordReset({ email: 'reset-me@example.com' });
+    expect(req.ok).toBe(true);
+    expect(req.resetCode).toMatch(/^\d{6}$/);
+
+    const result = await callerWithSession().auth.resetPassword({
+      email: 'reset-me@example.com',
+      code: req.resetCode!,
+      newPassword: 'brandnewpw',
+    });
+    expect(result.error).toBeUndefined();
+
+    const signIn = await callerWithSession().auth.signIn({ email: 'reset-me@example.com', password: 'brandnewpw' });
+    expect(signIn.error).toBeUndefined();
+  });
+
+  it('rejects an invalid code', async () => {
+    await callerWithSession().auth.signUp({
+      email: 'badcode@example.com',
+      password: 'correcthorse',
+      phone: '+233200000009',
+      fullName: 'Bad Code',
+    });
+    await callerWithSession().auth.requestPasswordReset({ email: 'badcode@example.com' });
+    const result = await callerWithSession().auth.resetPassword({
+      email: 'badcode@example.com',
+      code: '000000',
+      newPassword: 'brandnewpw',
+    });
+    expect(result.error).toBe('Invalid reset code');
+  });
+});
+
+describe('contact verification', () => {
+  it('marks a channel verified only for the issued code', async () => {
+    const { caller } = await signedInCaller();
+    const req = await caller.auth.requestVerification({ channel: 'email' });
+    expect(req.code).toMatch(/^\d{6}$/);
+
+    const wrong = await caller.auth.confirmVerification({ channel: 'email', code: '000000' });
+    expect(wrong.error).toBe('Invalid verification code');
+
+    const right = await caller.auth.confirmVerification({ channel: 'email', code: req.code });
+    expect(right.error).toBeUndefined();
+
+    const me = await caller.auth.me();
+    expect(me?.emailVerified).toBe(true);
+    expect(me?.phoneVerified).toBe(false);
+  });
+});
+
+describe('notifPrefsFor', () => {
+  it('returns another user’s prefs by id for a signed-in caller', async () => {
+    const { caller } = await signedInCaller();
+    const other = await callerWithSession().auth.signUp({
+      email: 'other-prefs@example.com',
+      password: 'correcthorse',
+      phone: '+233200000009',
+      fullName: 'Other Prefs',
+    });
+    const prefs = await caller.auth.notifPrefsFor({ userId: other.profile!.id });
+    expect(prefs).toEqual({ betUpdates: true, promotions: true, liveEvents: true });
+  });
+
+  it('returns null for an unknown user id', async () => {
+    const { caller } = await signedInCaller();
+    const prefs = await caller.auth.notifPrefsFor({ userId: 'does-not-exist' });
+    expect(prefs).toBeNull();
+  });
+});

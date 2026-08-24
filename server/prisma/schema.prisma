@@ -57,3 +57,13 @@ model DeviceSession {
   lastSeenAt DateTime @default(now())
   exp        DateTime
 }
+
+model VerificationCode {
+  id        String   @id @default(cuid())
+  userId    String
+  purpose   String   // "reset" | "verify_email" | "verify_phone"
+  code      String
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
+}

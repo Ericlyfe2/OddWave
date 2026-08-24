@@ -173,6 +173,74 @@ export const authRouter = router({
     });
     return count;
   }),
+
+  requestPasswordReset: publicProcedure
+    .input(z.object({ email: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const cleanEmail = input.email.trim().toLowerCase();
+      const user = await ctx.db.user.findUnique({ where: { email: cleanEmail } });
+      if (!user) return { ok: false, error: 'No account found with this email' };
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      await ctx.db.verificationCode.create({ data: { userId: user.id, purpose: 'reset', code } });
+      return { ok: true, resetCode: code };
+    }),
+
+  resetPassword: publicProcedure
+    .input(z.object({ email: z.string(), code: z.string(), newPassword: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const cleanEmail = input.email.trim().toLowerCase();
+      const user = await ctx.db.user.findUnique({ where: { email: cleanEmail } });
+      if (!user) return { error: 'No account found with this email' };
+
+      const stored = await ctx.db.verificationCode.findFirst({
+        where: { userId: user.id, purpose: 'reset' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!stored || stored.code !== input.code.trim()) return { error: 'Invalid reset code' };
+      if (Date.now() - stored.createdAt.getTime() > 15 * 60_000) return { error: 'Reset code expired, request a new one' };
+      if (input.newPassword.length < 6) return { error: 'Password must be at least 6 characters' };
+
+      const passwordHash = await argon2.hash(input.newPassword);
+      await ctx.db.user.update({ where: { id: user.id }, data: { passwordHash } });
+      await ctx.db.verificationCode.delete({ where: { id: stored.id } });
+      return {};
+    }),
+
+  requestVerification: protectedProcedure
+    .input(z.object({ channel: z.enum(['email', 'phone']) }))
+    .mutation(async ({ ctx, input }) => {
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      await ctx.db.verificationCode.create({
+        data: { userId: ctx.currentUser.id, purpose: `verify_${input.channel}`, code },
+      });
+      return { code };
+    }),
+
+  confirmVerification: protectedProcedure
+    .input(z.object({ channel: z.enum(['email', 'phone']), code: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const stored = await ctx.db.verificationCode.findFirst({
+        where: { userId: ctx.currentUser.id, purpose: `verify_${input.channel}` },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!stored || stored.code !== input.code.trim()) return { error: 'Invalid verification code' };
+      if (Date.now() - stored.createdAt.getTime() > 15 * 60_000) return { error: 'Code expired, request a new one' };
+
+      await ctx.db.user.update({
+        where: { id: ctx.currentUser.id },
+        data: input.channel === 'email' ? { emailVerified: true } : { phoneVerified: true },
+      });
+      await ctx.db.verificationCode.delete({ where: { id: stored.id } });
+      return {};
+    }),
+
+  notifPrefsFor: protectedProcedure
+    .input(z.object({ userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const prefs = await ctx.db.notificationPrefs.findUnique({ where: { userId: input.userId } });
+      if (!prefs) return null;
+      return { betUpdates: prefs.betUpdates, promotions: prefs.promotions, liveEvents: prefs.liveEvents };
+    }),
 });
 
 export { loadProfile };
