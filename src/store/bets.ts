@@ -9,7 +9,7 @@ import { useAuth } from './auth';
 import { useNotifs } from './notifs';
 import { liveEngine } from '@/lib/liveEngine';
 import { validateStake, potentialFor } from '@/lib/betsMath';
-import { cashoutValue } from '@/lib/cashout';
+import { cashoutValueLive } from '@/lib/cashoutLive';
 import { settleBetAgainstMatch } from '@/lib/settlement';
 import { logger } from '@/lib/logger';
 
@@ -214,7 +214,7 @@ export const useBets = create<BetsState>((set, get) => ({
   cashOut: async (betId, portion) => {
     const bet = get().bets.find((b) => b.id === betId);
     if (!bet || bet.status !== 'open') return { ok: false, error: 'Bet not active' };
-    const value = cashoutValue(bet);
+    const value = cashoutValueLive(bet);
     if (!value.available) return { ok: false, error: value.reason || 'Cash out unavailable' };
 
     set({ placing: true });

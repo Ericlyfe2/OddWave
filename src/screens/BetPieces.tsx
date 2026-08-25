@@ -5,7 +5,7 @@ import { Ticket, DollarSign, Zap, Loader2, AlertTriangle } from 'lucide-react';
 import type { Bet } from '@/lib/types';
 import { useBets } from '@/store/bets';
 import { useUI } from '@/store/ui';
-import { cashoutValue } from '@/lib/cashout';
+import { cashoutValueLive } from '@/lib/cashoutLive';
 import { money } from '@/lib/format';
 
 export function statusStyle(status: Bet['status']): string {
@@ -47,7 +47,7 @@ export function BetCard({ bet }: { bet: Bet }) {
   const toast = useUI((s) => s.toast);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(bet.legs.length <= 2);
-  const co = cashoutValue(bet);
+  const co = cashoutValueLive(bet);
 
   const doCashout = async (portion: number) => {
     setBusy(true);

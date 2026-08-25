@@ -1,6 +1,11 @@
-import type { Bet, BetLeg, Match } from './types';
+import type { Bet, BetLeg } from './types';
 import { round2 } from './format';
-import { outcomeResult } from './outcomes';
+import { outcomeResult, type MatchOutcomeInput } from './outcomes';
+
+export interface MatchSettlementInput extends MatchOutcomeInput {
+  id: string;
+  status: 'upcoming' | 'live' | 'finished' | 'postponed' | 'cancelled';
+}
 
 export interface SettledBet extends Bet {
   payout?: number;
@@ -23,7 +28,7 @@ function kCombinations<T>(items: T[], k: number): T[][] {
   return results;
 }
 
-export function settleBetAgainstMatch(bet: Bet, match: Match): Bet | null {
+export function settleBetAgainstMatch(bet: Bet, match: MatchSettlementInput): Bet | null {
   if (bet.status !== 'open') return null;
   const relevant = bet.legs.filter((l) => l.matchId === match.id && l.status === 'open');
   if (relevant.length === 0) return null;

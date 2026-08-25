@@ -1,6 +1,13 @@
 import type { Bet } from './types';
 import { round2, clamp } from './format';
-import { liveEngine } from './liveEngine';
+
+export interface MatchCashoutInput {
+  id: string;
+  status: 'upcoming' | 'live' | 'finished' | 'postponed' | 'cancelled';
+  score?: { home: number; away: number };
+  minute?: number;
+  markets: Array<{ key: string; suspended: boolean; outcomes: Array<{ code: string; odds: number; suspended?: boolean }> }>;
+}
 
 export interface CashoutState {
   available: boolean;
@@ -12,21 +19,18 @@ function impliedProb(odds: number): number {
   return clamp(1 / Math.max(1.01, odds), 0.02, 0.97);
 }
 
-export function cashoutValue(bet: Bet): CashoutState {
+export function cashoutValue(bet: Bet, matches: Record<string, MatchCashoutInput>): CashoutState {
   if (bet.status !== 'open') return { available: false, amount: 0, reason: 'Bet is not active' };
 
-  const liveLegs = bet.legs.filter((l) => {
-    const m = liveEngine.get(l.matchId);
-    return m && m.status === 'live';
-  });
+  const liveLegs = bet.legs.filter((l) => matches[l.matchId]?.status === 'live');
   const finishedOrMissing = bet.legs.filter((l) => {
-    const m = liveEngine.get(l.matchId);
+    const m = matches[l.matchId];
     return !m || m.status === 'finished' || m.status === 'cancelled' || m.status === 'postponed';
   });
 
   let prob = 1;
   for (const leg of bet.legs) {
-    const m = liveEngine.get(leg.matchId);
+    const m = matches[leg.matchId];
     if (!m) {
       prob *= 0.9;
       continue;
@@ -63,7 +67,8 @@ export function cashoutValue(bet: Bet): CashoutState {
   amount = clamp(amount, round2(base * 0.05), round2(base * 0.97));
 
   if (amount < 0.1) return { available: false, amount: 0, reason: 'Cash out value too low' };
-  if (liveLegs.length > 0 && liveEngine.get(liveLegs[0].matchId)?.markets.every((mk) => mk.suspended)) {
+  const firstLiveMatch = liveLegs.length > 0 ? matches[liveLegs[0].matchId] : undefined;
+  if (firstLiveMatch?.markets.every((mk) => mk.suspended)) {
     return { available: false, amount: 0, reason: 'Temporarily suspended' };
   }
   if (finishedOrMissing.length === bet.legs.length) {
