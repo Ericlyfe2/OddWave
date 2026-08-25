@@ -6,10 +6,12 @@ import { money, round2 } from '@/lib/format';
 import { logger } from '@/lib/logger';
 import { WITHDRAWAL_AUTO_APPROVE_MS } from '@/lib/config';
 import { useNotifs } from '@/store/notifs';
+import { trpcClient } from '@/lib/trpc';
+import type { NotificationPrefs } from '@/lib/types';
 
 interface WalletState {
   txns: Record<string, Txn[]>;
-  deposit: (userId: string, amount: number, provider: string) => Txn;
+  deposit: (userId: string, amount: number, provider: string, notifPrefs: NotificationPrefs | null) => Txn;
   requestWithdrawal: (userId: string, amount: number, momoNumber: string) => { txn?: Txn; error?: string };
   applyStake: (userId: string, amount: number, ref: string, bonusUsed: number) => void;
   credit: (userId: string, amount: number, type: TxnType, ref: string) => Txn;
@@ -44,7 +46,7 @@ export const useWallet = create<WalletState>((set, get) => {
   return {
     txns: loadJson<Record<string, Txn[]>>('wallet_txns', {}),
 
-    deposit: (userId, amount, provider) => {
+    deposit: (userId, amount, provider, notifPrefs) => {
       const txn: Txn = {
         id: uid('t-'),
         userId,
@@ -55,12 +57,10 @@ export const useWallet = create<WalletState>((set, get) => {
         createdAt: Date.now(),
       };
       push(userId, txn);
-      useNotifs.getState().push({
-        userId,
-        kind: 'deposit',
-        title: 'Deposit successful',
-        body: `${money(txn.amount)} added to your wallet · Ref ${txn.ref}`,
-      });
+      useNotifs.getState().push(
+        { userId, kind: 'deposit', title: 'Deposit successful', body: `${money(txn.amount)} added to your wallet · Ref ${txn.ref}` },
+        notifPrefs
+      );
       return txn;
     },
 
@@ -194,18 +194,21 @@ let approverStarted = false;
 export function startWithdrawalAutoApprover(): void {
   if (approverStarted || typeof window === 'undefined') return;
   approverStarted = true;
-  const sweep = () => {
+  const sweep = async () => {
     const state = useWallet.getState();
     const now = Date.now();
     for (const txn of state.pendingWithdrawals()) {
       if (now - txn.createdAt >= WITHDRAWAL_AUTO_APPROVE_MS) {
         state.resolveWithdrawal(txn.userId, txn.id, true);
-        useNotifs.getState().push({
-          userId: txn.userId,
-          kind: 'withdrawal',
-          title: 'Withdrawal approved',
-          body: `${money(Math.abs(txn.amount))} sent via mobile money · Ref ${txn.ref}`,
-        });
+        // protectedProcedure rejects (rather than returning null) when
+        // nobody is signed in or the session was revoked — this sweep must
+        // keep processing the rest of the queue either way, and notifs.push
+        // already treats a null prefs argument as "deliver" (see notifs.ts).
+        const notifPrefs = await trpcClient.auth.notifPrefsFor.query({ userId: txn.userId }).catch(() => null);
+        useNotifs.getState().push(
+          { userId: txn.userId, kind: 'withdrawal', title: 'Withdrawal approved', body: `${money(Math.abs(txn.amount))} sent via mobile money · Ref ${txn.ref}` },
+          notifPrefs
+        );
       }
     }
   };

@@ -12,11 +12,12 @@ import { useMatches } from '@/store/matches';
 import { liveEngine } from '@/lib/liveEngine';
 import { StatCard } from '@/components/ui';
 import { money, round2 } from '@/lib/format';
+import { trpc } from '@/lib/trpc';
 
 export function AdminOverview() {
   const navigate = useNavigate();
   const profile = useAuth((s) => s.profile);
-  const listProfiles = useAuth((s) => s.listProfiles);
+  const { data: profiles = [] } = trpc.admin.listUsers.useQuery();
   const wallet = useWallet();
   const bets = useBets((s) => s.bets);
   const matchesById = useMatches((s) => s.byId);
@@ -41,7 +42,7 @@ export function AdminOverview() {
     const payouts = round2(bets.reduce((s, b) => s + (b.payout ?? 0), 0));
     const exposure = round2(open.reduce((s, b) => s + (b.potential || b.stake * Math.max(b.totalOdds, 1)), 0));
     return {
-      users: listProfiles().length,
+      users: profiles.length,
       openCount: open.length,
       stakedOpen: round2(open.reduce((s, b) => s + b.stake, 0)),
       turnover,
@@ -50,7 +51,7 @@ export function AdminOverview() {
       exposure,
       pendingWd: wallet.pendingWithdrawals(),
     };
-  }, [bets, wallet.txns]);
+  }, [bets, wallet.txns, profiles]);
 
   const manageable = useMemo(() => {
     const q = query.trim().toLowerCase();

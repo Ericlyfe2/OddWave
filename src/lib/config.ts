@@ -14,7 +14,9 @@ export const LIMITS = {
 
 export const BOOKING_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 export const WITHDRAWAL_AUTO_APPROVE_MS = 120_000;
-export const SESSION_DAYS = 7;
+// Session length is server-owned (server/src/routers/auth.ts) — the server
+// process can't import this Vite-only module (import.meta.env doesn't exist
+// under plain tsx), so it keeps its own copy rather than sharing this one.
 export const ACCA_BONUS_TIERS: Array<{ picks: number; pct: number }> = [
   { picks: 5, pct: 3 },
   { picks: 6, pct: 5 },

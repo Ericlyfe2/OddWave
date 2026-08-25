@@ -17,8 +17,8 @@ export function SettingsScreen() {
 
   const prefs = profile.notifPrefs;
 
-  const togglePref = (key: keyof typeof prefs) => {
-    updateProfile({ notifPrefs: { ...prefs, [key]: !prefs[key] } });
+  const togglePref = async (key: keyof typeof prefs) => {
+    await updateProfile({ notifPrefs: { ...prefs, [key]: !prefs[key] } });
   };
 
   return (

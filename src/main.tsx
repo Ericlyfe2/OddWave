@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './index.css';
 import { useAuth } from '@/store/auth';
@@ -8,6 +9,10 @@ import { useBets } from '@/store/bets';
 import { startWithdrawalAutoApprover } from '@/store/wallet';
 import { installBookingBridge } from '@/lib/bookingBridge';
 import { installSlipOwnerSync } from '@/store/slip';
+import { trpc, trpcClientConfig } from '@/lib/trpc';
+
+const queryClient = new QueryClient();
+const trpcClientInstance = trpc.createClient(trpcClientConfig());
 
 async function boot() {
   await useAuth.getState().init();
@@ -21,7 +26,11 @@ async function boot() {
   const root = createRoot(document.getElementById('root')!);
   root.render(
     <StrictMode>
-      <App />
+      <trpc.Provider client={trpcClientInstance} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </trpc.Provider>
     </StrictMode>
   );
 

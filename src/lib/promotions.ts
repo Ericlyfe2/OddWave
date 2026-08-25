@@ -1,8 +1,5 @@
-import { useWallet } from '@/store/wallet';
 import { useAuth } from '@/store/auth';
-import { useNotifs } from '@/store/notifs';
 import { usePromotions } from '@/store/promotions';
-import { round2 } from './format';
 
 /**
  * Campaign content (copy, value, terms, active status) is fully admin-editable
@@ -19,36 +16,20 @@ export function claimPromotion(promoId: string): { ok: boolean; error?: string; 
   if (!promo || !promo.active) return { ok: false, error: 'Promotion not found' };
   if (profile.claimedPromos.includes(promoId)) return { ok: false, error: 'You have already claimed this promotion' };
 
-  const wallet = useWallet.getState();
-
-  if (promo.kind === 'welcome') {
-    const hasBets = Object.keys(useWallet.getState().txns[profile.id] || []).length > 0;
-    if (hasBets) return { ok: false, error: 'Welcome offer is for your first bet' };
-    wallet.credit(profile.id, 0, 'bonus', `WELCOME-${promo.value}`);
-    useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance + promo.value), claimedPromos: [...profile.claimedPromos, promoId] });
-    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Welcome boost claimed', body: `${promo.value} bonus stake added to your account` });
-    return { ok: true, message: `${promo.value} bonus credited` };
-  }
-
-  if (promo.kind === 'freebet') {
-    const todayStart = new Date().setHours(0, 0, 0, 0);
-    const qualifying = (wallet.userTxns(profile.id) || []).some(
-      (t) => t.type === 'stake' && t.status === 'success' && Math.abs(t.amount) >= 50 && t.createdAt >= todayStart
-    );
-    if (!qualifying) return { ok: false, error: 'Place a 50+ multi stake with 3+ legs first' };
-    wallet.credit(profile.id, 0, 'bonus', `FREEBET-${promo.id}`);
-    useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance + promo.value), claimedPromos: [...profile.claimedPromos, promoId] });
-    useNotifs.getState().push({ userId: profile.id, kind: 'promo', title: 'Free bet claimed', body: `${promo.value} free bet added` });
-    return { ok: true, message: `${promo.value} free bet credited` };
+  // welcome/freebet/cashback all persist bonusBalance and/or claimedPromos —
+  // the backend's updateProfile deliberately does not accept either field
+  // (see server/src/routers/auth.ts: a self-service endpoint that did would
+  // let any signed-in user mint themselves an arbitrary bonus balance), and
+  // there's no server-side promotions/claims table yet to persist a claim
+  // against instead. Crediting the wallet locally anyway would show a
+  // "claimed" state that silently reverts on the next profile refresh — an
+  // honest "not yet" is better than a bonus that quietly disappears.
+  if (promo.kind === 'welcome' || promo.kind === 'freebet' || promo.kind === 'cashback') {
+    return { ok: false, error: 'Promotions are not available yet in this release — check back soon' };
   }
 
   if (promo.kind === 'boost') {
     return { ok: true, message: 'Acca boost is applied automatically to eligible multis' };
-  }
-
-  if (promo.kind === 'cashback') {
-    useAuth.getState().updateProfile({ claimedPromos: [...profile.claimedPromos, promoId] });
-    return { ok: true, message: 'Cashback opted in — check back on Monday' };
   }
 
   return { ok: false, error: 'Promotion unavailable' };

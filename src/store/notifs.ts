@@ -2,11 +2,10 @@ import { create } from 'zustand';
 import type { AppNotification, NotificationPrefs } from '@/lib/types';
 import { loadJson, saveJson } from '@/lib/storage';
 import { uid } from '@/lib/rng';
-import { findProfileById } from '@/store/auth';
 
 interface NotifsState {
   items: AppNotification[];
-  push: (n: Omit<AppNotification, 'id' | 'read' | 'createdAt'> & { createdAt?: number }) => void;
+  push: (n: Omit<AppNotification, 'id' | 'read' | 'createdAt'> & { createdAt?: number }, notifPrefs: NotificationPrefs | null) => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
   clear: (userId: string) => void;
@@ -39,14 +38,11 @@ function prefKeyFor(kind: AppNotification['kind']): keyof NotificationPrefs | nu
 export const useNotifs = create<NotifsState>((set, get) => ({
   items: loadJson<AppNotification[]>('notifs', []),
 
-  push: (n) => {
+  push: (n, notifPrefs) => {
     const prefKey = prefKeyFor(n.kind);
-    if (prefKey) {
-      const profile = findProfileById(n.userId);
-      // No profile on record (e.g. a stale/removed account) fails open rather
-      // than silently dropping a notification for a user we can't check.
-      if (profile && !profile.notifPrefs[prefKey]) return;
-    }
+    // No prefs on record (e.g. an unresolved lookup) fails open rather than
+    // silently dropping a notification for a user we can't check.
+    if (prefKey && notifPrefs && !notifPrefs[prefKey]) return;
 
     const item: AppNotification = {
       id: uid('n-'),

@@ -192,7 +192,12 @@ export const useBets = create<BetsState>((set, get) => ({
 
     wallet.applyStake(profile.id, totalStake, bookingCode, bonusToUse);
     if (bonusToUse > 0) {
-      useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance - bonusToUse) });
+      // spendBonus, not updateProfile: the server no longer accepts a
+      // client-supplied bonusBalance (that was a mintable-balance hole),
+      // and updateProfile's response would otherwise overwrite the local
+      // profile with the un-debited balance, making bonus stakes free and
+      // infinitely reusable.
+      useAuth.getState().spendBonus(bonusToUse);
     }
 
     useNotifs.getState().push({
@@ -200,7 +205,7 @@ export const useBets = create<BetsState>((set, get) => ({
       kind: 'bet_placed',
       title: 'Bet placed successfully',
       body: `${type === 'single' ? `${legs.length} single${legs.length > 1 ? 's' : ''}` : `${type.toUpperCase()} · ${totals.comboCount} combo`} · Stake ${totalStake.toFixed(2)} → Win ${totals.potential.toFixed(2)} · Code ${bookingCode}`,
-    });
+    }, profile.notifPrefs);
 
     logger.info('bet.placed', { userId: profile.id, betIds, totalStake, type });
     return { ok: true, betIds };
@@ -244,7 +249,7 @@ export const useBets = create<BetsState>((set, get) => ({
         kind: 'cashout',
         title: 'Cash out successful',
         body: `${amount.toFixed(2)} credited to your wallet`,
-      });
+      }, profile.notifPrefs);
     }
     logger.info('bet.cashout', { betId, amount, portion });
     return { ok: true, amount };
@@ -284,7 +289,7 @@ export const useBets = create<BetsState>((set, get) => ({
             title: 'Bet won!',
             body: `${bet.bookingCode} paid out ${payout.toFixed(2)}`,
             link: '/bets',
-          });
+          }, useAuth.getState().profile!.notifPrefs);
         }
       } else if (useAuth.getState().profile?.id === bet.userId) {
         notifs.push({
@@ -293,7 +298,7 @@ export const useBets = create<BetsState>((set, get) => ({
           title: 'Bet settled',
           body: `${bet.bookingCode} did not win. Check details.`,
           link: '/bets',
-        });
+        }, useAuth.getState().profile!.notifPrefs);
       }
     }
   },

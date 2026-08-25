@@ -8,8 +8,19 @@ export async function signIn(page: Page, email: string = DEMO_PLAYER): Promise<v
   await page.goto('/auth');
   await page.getByRole('button', { name: new RegExp(email) }).click();
   await page.getByRole('button', { name: 'Login', exact: true }).last().click();
-  await expect(page).toHaveURL(/\/$|\/(?!auth)/);
-  await expect(page.getByRole('link', { name: 'Account' }).first()).toBeVisible();
+  // Both checks below must actually wait for the real signIn mutation (a network
+  // round trip to the backend) to resolve and for the session cookie to land —
+  // loose versions of these checks silently pass while still signed out, which
+  // used to be harmless against the old synchronous localStorage demo but races
+  // for real against the now-async backend:
+  //   - `\/\$|\/(?!auth)` is unanchored, so it matches the literal "//" in
+  //     "http://localhost:3000/auth" itself, i.e. it's satisfied by the /auth
+  //     URL and never actually waits for navigation away from it.
+  //   - `getByRole('link', { name: 'Account' })` without `exact` substring-matches,
+  //     so it matches the signed-out bottom-nav link too (its accessible name is
+  //     "Sign in required Account" via a nested aria-label span).
+  await expect(page).not.toHaveURL(/\/auth(\?.*)?$/);
+  await expect(page.getByRole('link', { name: 'Account', exact: true }).first()).toBeVisible();
 }
 
 export async function signOut(page: Page): Promise<void> {

@@ -64,7 +64,7 @@ export function GamesScreen() {
     const credit = useWallet.getState();
     if (scored) {
       credit.credit(profile.id, payout, 'payout', `PKWIN-${Date.now().toString(36).toUpperCase()}`);
-      useNotifs.getState().push({ userId: profile.id, kind: 'bet_won', title: 'Goal! Penalty Kings win', body: `${payout} credited to your wallet` });
+      useNotifs.getState().push({ userId: profile.id, kind: 'bet_won', title: 'Goal! Penalty Kings win', body: `${payout} credited to your wallet` }, profile.notifPrefs);
     }
     setHistory((h) => [{ pick: chosen, keeper: keeperSide, won: scored }, ...h].slice(0, 8));
   };
