@@ -138,6 +138,20 @@ describe('auth.me / signOut / updateProfile', () => {
     expect(me).toBeNull();
   });
 
+  it('signOut never throws, even with no session or an already-revoked one', async () => {
+    // Regression: signOut used to be protectedProcedure, so a user whose
+    // session was revoked from another device (or who was never signed in)
+    // got UNAUTHORIZED and had no way to clear the stale cookie client-side.
+    await expect(callerWithSession().auth.signOut()).resolves.toBeUndefined();
+
+    const { caller } = await signedInCaller();
+    const otherSession: SessionData = {};
+    const otherCaller = callerWithSession(otherSession);
+    await otherCaller.auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    await caller.auth.revokeOtherSessions();
+    await expect(otherCaller.auth.signOut()).resolves.toBeUndefined();
+  });
+
   it('updateProfile updates allowed fields but ignores role/suspended', async () => {
     const { caller } = await signedInCaller();
     const updated = await caller.auth.updateProfile({
@@ -150,18 +164,54 @@ describe('auth.me / signOut / updateProfile', () => {
     expect(updated?.suspended).toBe(false);
   });
 
-  it('updateProfile persists bonusBalance and claimedPromos', async () => {
+  it('updateProfile does not accept bonusBalance or claimedPromos', async () => {
+    // Regression: these are money-equivalent fields. An earlier version of
+    // this schema accepted them, which let any signed-in caller mint
+    // themselves an arbitrary bonus balance via a self-service endpoint.
     const { caller } = await signedInCaller();
     const updated = await caller.auth.updateProfile({
       bonusBalance: 50,
       claimedPromos: ['welcome'],
-    });
-    expect(updated?.bonusBalance).toBe(50);
-    expect(updated?.claimedPromos).toEqual(['welcome']);
+    } as never);
+    expect(updated?.bonusBalance).toBe(0);
+    expect(updated?.claimedPromos).toEqual([]);
+  });
 
-    const me = await caller.auth.me();
-    expect(me?.bonusBalance).toBe(50);
-    expect(me?.claimedPromos).toEqual(['welcome']);
+  it('updateProfile persists rgLimits, and setting a deposit limit does not disturb the others', async () => {
+    const { caller } = await signedInCaller();
+    const updated = await caller.auth.updateProfile({
+      rgLimits: { depositLimit: 100, lossLimit: 50, sessionReminderMin: 60 },
+    });
+    expect(updated?.rgLimits).toEqual({
+      depositLimit: 100,
+      lossLimit: 50,
+      sessionReminderMin: 60,
+      selfExcludedUntil: null,
+    });
+
+    const updated2 = await caller.auth.updateProfile({ rgLimits: { depositLimit: 200 } });
+    expect(updated2?.rgLimits.depositLimit).toBe(200);
+    expect(updated2?.rgLimits.lossLimit).toBe(50);
+  });
+
+  it('self-exclusion set via updateProfile blocks a later signIn', async () => {
+    const { caller } = await signedInCaller();
+    await caller.auth.updateProfile({ rgLimits: { selfExcludedUntil: Date.now() + 86_400_000 } });
+
+    const result = await callerWithSession().auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    expect(result.error).toBe('Account is under self-exclusion until further notice');
+  });
+
+  it('self-exclusion cannot be shortened or cleared via updateProfile while active', async () => {
+    const { caller } = await signedInCaller();
+    const farOut = Date.now() + 86_400_000 * 30;
+    await caller.auth.updateProfile({ rgLimits: { selfExcludedUntil: farOut } });
+
+    const shortened = await caller.auth.updateProfile({ rgLimits: { selfExcludedUntil: Date.now() + 1_000 } });
+    expect(shortened?.rgLimits.selfExcludedUntil).toBe(farOut);
+
+    const cleared = await caller.auth.updateProfile({ rgLimits: { selfExcludedUntil: null } });
+    expect(cleared?.rgLimits.selfExcludedUntil).toBe(farOut);
   });
 });
 
@@ -187,6 +237,19 @@ describe('auth.changePassword', () => {
     expect(oldPw.error).toBe('Incorrect email or password');
     const newPw = await callerWithSession().auth.signIn({ email: 'session-user@example.com', password: 'newenough' });
     expect(newPw.error).toBeUndefined();
+  });
+
+  it('revokes every other device, but not the one making the change', async () => {
+    const { caller } = await signedInCaller();
+    const otherSession: SessionData = {};
+    const otherCaller = callerWithSession(otherSession);
+    await otherCaller.auth.signIn({ email: 'session-user@example.com', password: 'correcthorse' });
+    expect(await otherCaller.auth.me()).not.toBeNull();
+
+    await caller.auth.changePassword({ currentPassword: 'correcthorse', newPassword: 'newenough' });
+
+    expect(await caller.auth.me()).not.toBeNull();
+    expect(await otherCaller.auth.me()).toBeNull();
   });
 });
 
@@ -284,6 +347,28 @@ describe('password reset', () => {
 
     const signIn = await callerWithSession().auth.signIn({ email: 'reset-me@example.com', password: 'brandnewpw' });
     expect(signIn.error).toBeUndefined();
+  });
+
+  it('revokes every existing session on the account', async () => {
+    await callerWithSession().auth.signUp({
+      email: 'reset-sessions@example.com',
+      password: 'correcthorse',
+      phone: '+233200000009',
+      fullName: 'Reset Sessions',
+    });
+    const activeSession: SessionData = {};
+    const activeCaller = callerWithSession(activeSession);
+    await activeCaller.auth.signIn({ email: 'reset-sessions@example.com', password: 'correcthorse' });
+    expect(await activeCaller.auth.me()).not.toBeNull();
+
+    const req = await callerWithSession().auth.requestPasswordReset({ email: 'reset-sessions@example.com' });
+    await callerWithSession().auth.resetPassword({
+      email: 'reset-sessions@example.com',
+      code: req.resetCode!,
+      newPassword: 'brandnewpw',
+    });
+
+    expect(await activeCaller.auth.me()).toBeNull();
   });
 
   it('rejects an invalid code', async () => {

@@ -200,7 +200,11 @@ export function startWithdrawalAutoApprover(): void {
     for (const txn of state.pendingWithdrawals()) {
       if (now - txn.createdAt >= WITHDRAWAL_AUTO_APPROVE_MS) {
         state.resolveWithdrawal(txn.userId, txn.id, true);
-        const notifPrefs = await trpcClient.auth.notifPrefsFor.query({ userId: txn.userId });
+        // protectedProcedure rejects (rather than returning null) when
+        // nobody is signed in or the session was revoked — this sweep must
+        // keep processing the rest of the queue either way, and notifs.push
+        // already treats a null prefs argument as "deliver" (see notifs.ts).
+        const notifPrefs = await trpcClient.auth.notifPrefsFor.query({ userId: txn.userId }).catch(() => null);
         useNotifs.getState().push(
           { userId: txn.userId, kind: 'withdrawal', title: 'Withdrawal approved', body: `${money(Math.abs(txn.amount))} sent via mobile money · Ref ${txn.ref}` },
           notifPrefs

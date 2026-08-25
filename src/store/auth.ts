@@ -6,14 +6,12 @@ interface AuthState {
   profile: Profile | null;
   ready: boolean;
   init: () => Promise<void>;
-  signUp: (email: string, password: string, phone: string, fullName: string) => Promise<{ error?: string; needsVerification?: boolean }>;
+  signUp: (email: string, password: string, phone: string, fullName: string) => Promise<{ error?: string }>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   updateProfile: (patch: Partial<Profile>) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; resetCode?: string; error?: string }>;
   resetPassword: (email: string, code: string, newPassword: string) => Promise<{ error?: string }>;
-  listProfiles: () => Promise<Profile[]>;
-  adminUpdateUser: (userId: string, patch: Partial<Profile>) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ error?: string }>;
   listSessions: () => Promise<Array<DeviceSession & { current: boolean }>>;
   revokeSession: (sessionId: string) => Promise<{ signedOut: boolean }>;
@@ -27,8 +25,16 @@ export const useAuth = create<AuthState>((set) => ({
   ready: false,
 
   init: async () => {
-    const profile = await trpcClient.auth.me.query();
-    set({ profile, ready: true });
+    // A network failure here (backend unreachable, mid-deploy, cold start)
+    // must not stop the app from rendering — the caller awaits this before
+    // mounting React at all, so an unhandled rejection here means a blank
+    // white page with no error boundary reachable to show anything.
+    try {
+      const profile = await trpcClient.auth.me.query();
+      set({ profile, ready: true });
+    } catch {
+      set({ profile: null, ready: true });
+    }
   },
 
   signUp: async (email, password, phone, fullName) => {
@@ -58,12 +64,6 @@ export const useAuth = create<AuthState>((set) => ({
   requestPasswordReset: (email) => trpcClient.auth.requestPasswordReset.mutate({ email }),
 
   resetPassword: (email, code, newPassword) => trpcClient.auth.resetPassword.mutate({ email, code, newPassword }),
-
-  listProfiles: () => trpcClient.admin.listUsers.query(),
-
-  adminUpdateUser: async (userId, patch) => {
-    await trpcClient.admin.updateUser.mutate({ userId, patch: patch as never });
-  },
 
   changePassword: (currentPassword, newPassword) => trpcClient.auth.changePassword.mutate({ currentPassword, newPassword }),
 

@@ -23,7 +23,7 @@ async function upsertDemo(
     // password left rotated, or notification prefs left toggled off). An
     // empty `update` silently defeated that: reseeding a pre-existing row
     // did nothing at all.
-    update: { passwordHash, fullName, phone, role, bonusBalance, claimedPromos, emailVerified: false, phoneVerified: false },
+    update: { passwordHash, fullName, phone, role, bonusBalance, claimedPromos, emailVerified: false, phoneVerified: false, suspended: false },
     create: {
       id,
       email,

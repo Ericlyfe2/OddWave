@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import * as argon2 from 'argon2';
 import { publicProcedure, protectedProcedure, router } from '../trpc';
 import { mapProfile, mapDeviceSession } from '../mappers';
+import { validateSession } from '../session';
 
 // Local to the server on purpose: the frontend's src/lib/config.ts reads
 // import.meta.env at module scope, which only exists under Vite/Vitest —
@@ -35,6 +37,18 @@ async function openDeviceSession(
   session.sessionId = row.id;
   await (session as unknown as { save: () => Promise<void> }).save();
   return mapDeviceSession(row);
+}
+
+/**
+ * Self-exclusion is a one-way lock while active: the client is allowed to
+ * set or extend it, but never to shorten or clear it while it's currently
+ * in effect — that would defeat the entire mechanism, and the API can't
+ * trust the client to only ever send extensions.
+ */
+function resolveSelfExclusion(current: Date | null, requestedMs: number | null | undefined): Date | null {
+  const currentlyExcluded = current != null && current > new Date();
+  if (currentlyExcluded && (requestedMs == null || requestedMs < current.getTime())) return current;
+  return requestedMs != null ? new Date(requestedMs) : null;
 }
 
 /** Best-effort device label from the real request header — never invented. */
@@ -107,7 +121,11 @@ export const authRouter = router({
       return { profile: mapProfile(user, rgLimits, notifPrefs) };
     }),
 
-  signOut: protectedProcedure.mutation(async ({ ctx }) => {
+  // Deliberately publicProcedure, not protectedProcedure: signing out must
+  // never fail. A user whose session was revoked from another device, or
+  // who was suspended, would get UNAUTHORIZED from protectedProcedure and
+  // be stuck looking signed-in with no way to clear it client-side.
+  signOut: publicProcedure.mutation(async ({ ctx }) => {
     if (ctx.session.sessionId) {
       await ctx.db.deviceSession.delete({ where: { id: ctx.session.sessionId } }).catch(() => undefined);
     }
@@ -115,28 +133,12 @@ export const authRouter = router({
   }),
 
   me: publicProcedure.query(async ({ ctx }) => {
-    if (!ctx.session.userId || !ctx.session.sessionId) return null;
-    // Same reasoning as protectedProcedure: the cookie alone isn't proof of a
-    // live session — a revoked-from-another-device session still decrypts
-    // fine until its own 30-day cookie lifetime runs out, but its
-    // DeviceSession row is gone the moment it's revoked. Also mirror
-    // protectedProcedure's suspended check — otherwise a suspended user still
-    // sees a full profile from `me` and is only caught on their next mutation.
-    const [user, deviceSession] = await Promise.all([
-      ctx.db.user.findUnique({ where: { id: ctx.session.userId } }),
-      ctx.db.deviceSession.findUnique({ where: { id: ctx.session.sessionId } }),
-    ]);
-    if (
-      !user ||
-      user.suspended ||
-      !deviceSession ||
-      deviceSession.userId !== user.id ||
-      deviceSession.exp < new Date()
-    ) {
+    const user = await validateSession(ctx.db, ctx.session);
+    if (!user) {
       ctx.session.destroy();
       return null;
     }
-    return loadProfile(ctx.db, ctx.session.userId);
+    return loadProfile(ctx.db, user.id);
   }),
 
   updateProfile: protectedProcedure
@@ -145,8 +147,20 @@ export const authRouter = router({
         fullName: z.string().min(1).optional(),
         phone: z.string().min(1).optional(),
         notifPrefs: z.object({ betUpdates: z.boolean(), promotions: z.boolean(), liveEvents: z.boolean() }).optional(),
-        bonusBalance: z.number().optional(),
-        claimedPromos: z.array(z.string()).optional(),
+        // bonusBalance and claimedPromos are deliberately NOT accepted here —
+        // they're money-equivalent, and a self-service endpoint that accepts
+        // them lets any signed-in user mint themselves an arbitrary bonus
+        // balance or re-claim a promo indefinitely. Same category as
+        // role/suspended, which this endpoint has also never accepted.
+        rgLimits: z
+          .object({
+            depositLimit: z.number().min(10).nullable(),
+            lossLimit: z.number().min(10).nullable(),
+            sessionReminderMin: z.number().positive().nullable(),
+            selfExcludedUntil: z.number().nullable(),
+          })
+          .partial()
+          .optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -155,12 +169,32 @@ export const authRouter = router({
         data: {
           fullName: input.fullName,
           phone: input.phone,
-          bonusBalance: input.bonusBalance,
-          claimedPromos: input.claimedPromos,
         },
       });
       if (input.notifPrefs) {
         await ctx.db.notificationPrefs.update({ where: { userId: user.id }, data: input.notifPrefs });
+      }
+      if (input.rgLimits) {
+        const current = await ctx.db.rgLimits.findUnique({ where: { userId: user.id } });
+        const nextExclusion = resolveSelfExclusion(current?.selfExcludedUntil ?? null, input.rgLimits.selfExcludedUntil);
+        await ctx.db.rgLimits.upsert({
+          where: { userId: user.id },
+          create: {
+            userId: user.id,
+            depositLimit: input.rgLimits.depositLimit ?? undefined,
+            lossLimit: input.rgLimits.lossLimit ?? undefined,
+            sessionReminderMin: input.rgLimits.sessionReminderMin ?? undefined,
+            selfExcludedUntil: nextExclusion ?? undefined,
+          },
+          update: {
+            ...(input.rgLimits.depositLimit !== undefined ? { depositLimit: input.rgLimits.depositLimit } : {}),
+            ...(input.rgLimits.lossLimit !== undefined ? { lossLimit: input.rgLimits.lossLimit } : {}),
+            ...(input.rgLimits.sessionReminderMin !== undefined
+              ? { sessionReminderMin: input.rgLimits.sessionReminderMin }
+              : {}),
+            ...('selfExcludedUntil' in input.rgLimits ? { selfExcludedUntil: nextExclusion } : {}),
+          },
+        });
       }
       return loadProfile(ctx.db, user.id);
     }),
@@ -175,6 +209,12 @@ export const authRouter = router({
 
       const passwordHash = await argon2.hash(input.newPassword);
       await ctx.db.user.update({ where: { id: ctx.currentUser.id }, data: { passwordHash } });
+      // Changing your password is the standard "I think someone else has
+      // access" signal — revoke every other device so a hijacked session
+      // doesn't survive the change.
+      await ctx.db.deviceSession.deleteMany({
+        where: { userId: ctx.currentUser.id, id: { not: ctx.session.sessionId } },
+      });
       return {};
     }),
 
@@ -200,6 +240,12 @@ export const authRouter = router({
     }),
 
   revokeOtherSessions: protectedProcedure.mutation(async ({ ctx }) => {
+    // ctx.session.sessionId is typed string | undefined (SessionData's own
+    // shape), even though protectedProcedure has already guaranteed it's set
+    // — Prisma treats `not: undefined` as no filter at all, which here would
+    // mean "delete every session for this user, including the current one".
+    // Fail loudly rather than silently sign the caller out of everything.
+    if (!ctx.session.sessionId) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Not signed in' });
     const { count } = await ctx.db.deviceSession.deleteMany({
       where: { userId: ctx.currentUser.id, id: { not: ctx.session.sessionId } },
     });
@@ -235,6 +281,10 @@ export const authRouter = router({
       const passwordHash = await argon2.hash(input.newPassword);
       await ctx.db.user.update({ where: { id: user.id }, data: { passwordHash } });
       await ctx.db.verificationCode.delete({ where: { id: stored.id } });
+      // A password reset means the account was likely compromised or the
+      // owner lost access — revoke every existing session, including
+      // whichever device is completing this reset (it'll sign in fresh).
+      await ctx.db.deviceSession.deleteMany({ where: { userId: user.id } });
       return {};
     }),
 
