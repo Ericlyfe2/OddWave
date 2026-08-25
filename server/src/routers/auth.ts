@@ -119,9 +119,20 @@ export const authRouter = router({
     // Same reasoning as protectedProcedure: the cookie alone isn't proof of a
     // live session — a revoked-from-another-device session still decrypts
     // fine until its own 30-day cookie lifetime runs out, but its
-    // DeviceSession row is gone the moment it's revoked.
-    const deviceSession = await ctx.db.deviceSession.findUnique({ where: { id: ctx.session.sessionId } });
-    if (!deviceSession || deviceSession.exp < new Date()) {
+    // DeviceSession row is gone the moment it's revoked. Also mirror
+    // protectedProcedure's suspended check — otherwise a suspended user still
+    // sees a full profile from `me` and is only caught on their next mutation.
+    const [user, deviceSession] = await Promise.all([
+      ctx.db.user.findUnique({ where: { id: ctx.session.userId } }),
+      ctx.db.deviceSession.findUnique({ where: { id: ctx.session.sessionId } }),
+    ]);
+    if (
+      !user ||
+      user.suspended ||
+      !deviceSession ||
+      deviceSession.userId !== user.id ||
+      deviceSession.exp < new Date()
+    ) {
       ctx.session.destroy();
       return null;
     }

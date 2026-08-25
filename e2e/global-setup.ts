@@ -24,7 +24,19 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
       body: JSON.stringify({ email, password }),
     });
     const cookie = signInRes.headers.get('set-cookie');
-    if (!cookie) continue; // server not reachable yet or credentials rejected — nothing to clean up
+    if (!cookie) {
+      // The one realistic cause, given webServer's health check already
+      // guarantees the server is up: a prior failed run left this demo
+      // account's password rotated away from what's hardcoded here. Fail
+      // loudly now rather than proceeding to 50 confusing signIn() failures
+      // with no pointer back to the actual cause.
+      const body = await signInRes.text().catch(() => '<unreadable body>');
+      throw new Error(
+        `global-setup: signIn as ${email} did not return a session cookie ` +
+          `(status ${signInRes.status}, body: ${body}). The demo account's ` +
+          `password may be out of sync with the hardcoded value here.`
+      );
+    }
     const sessionCookie = cookie.split(';')[0];
 
     await fetch(`${API_BASE}/auth.revokeOtherSessions`, {

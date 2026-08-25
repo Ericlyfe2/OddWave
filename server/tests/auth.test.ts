@@ -249,10 +249,14 @@ describe('session management', () => {
 
     await caller.auth.revokeOtherSessions();
 
-    expect(await otherCaller.auth.me()).toBeNull();
+    // changePassword goes through protectedProcedure directly — assert it
+    // first, before anything else touches otherSession, so this covers
+    // protectedProcedure's own DeviceSession check rather than riding on
+    // me()'s `ctx.session.destroy()` having already emptied the session.
     await expect(otherCaller.auth.changePassword({ currentPassword: 'x', newPassword: 'y' })).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
+    expect(await otherCaller.auth.me()).toBeNull();
   });
 });
 

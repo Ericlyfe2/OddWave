@@ -15,9 +15,15 @@ async function upsertDemo(
   claimedPromos: string[]
 ) {
   const passwordHash = await argon2.hash(password);
-  await db.user.upsert({
+  const user = await db.user.upsert({
     where: { email },
-    update: {},
+    // Demo accounts are one shared row reused across every dev session and
+    // e2e run — reseeding is the documented way tests reset state that has
+    // no dedicated reset endpoint (e.g. emailVerified/phoneVerified, a
+    // password left rotated, or notification prefs left toggled off). An
+    // empty `update` silently defeated that: reseeding a pre-existing row
+    // did nothing at all.
+    update: { passwordHash, fullName, phone, role, bonusBalance, claimedPromos, emailVerified: false, phoneVerified: false },
     create: {
       id,
       email,
@@ -27,9 +33,20 @@ async function upsertDemo(
       role,
       bonusBalance,
       claimedPromos,
-      rgLimits: { create: {} },
-      notifPrefs: { create: {} },
     },
+  });
+  // Same reasoning as above, for the two rows the create branch above no
+  // longer nests: upsert so a reseed resets these back to defaults too,
+  // not just the first time the account is created.
+  await db.rgLimits.upsert({
+    where: { userId: user.id },
+    update: { depositLimit: null, lossLimit: null, sessionReminderMin: null, selfExcludedUntil: null },
+    create: { userId: user.id },
+  });
+  await db.notificationPrefs.upsert({
+    where: { userId: user.id },
+    update: { betUpdates: true, promotions: true, liveEvents: true },
+    create: { userId: user.id },
   });
 }
 

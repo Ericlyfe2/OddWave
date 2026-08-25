@@ -20,7 +20,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     ctx.db.user.findUnique({ where: { id: ctx.session.userId } }),
     ctx.db.deviceSession.findUnique({ where: { id: ctx.session.sessionId } }),
   ]);
-  if (!user || user.suspended || !deviceSession || deviceSession.exp < new Date()) {
+  if (!user || user.suspended || !deviceSession || deviceSession.userId !== user.id || deviceSession.exp < new Date()) {
     ctx.session.destroy();
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Session no longer valid' });
   }

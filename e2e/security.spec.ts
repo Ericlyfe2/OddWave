@@ -34,32 +34,49 @@ test.describe('account security', () => {
   });
 
   test('a changed password actually replaces the old one', async ({ page }) => {
-    await signIn(page);
-    await page.goto('/account/security');
-    await page.getByLabel('Current password').fill('Fan12345');
-    await page.getByLabel('New password', { exact: true }).fill('Rotated456');
-    await page.getByLabel('Confirm new password').fill('Rotated456');
-    await page.getByRole('button', { name: /Update Password/ }).click();
-    await expect(page.getByText('Password updated')).toBeVisible();
+    // The demo account's password is a fixed, shared credential (the login
+    // screen's own quick-fill button, and every other test's signIn() helper,
+    // hardcode 'Fan12345') against one real, persistent database — a failed
+    // assertion partway through rotation must not leave it stuck on
+    // 'Rotated456' and poison every test that runs after this one, so the
+    // restore runs in `finally` no matter what fails above it.
+    try {
+      await signIn(page);
+      await page.goto('/account/security');
+      await page.getByLabel('Current password').fill('Fan12345');
+      await page.getByLabel('New password', { exact: true }).fill('Rotated456');
+      await page.getByLabel('Confirm new password').fill('Rotated456');
+      await page.getByRole('button', { name: /Update Password/ }).click();
+      await expect(page.getByText('Password updated')).toBeVisible();
 
-    await signOut(page);
+      await signOut(page);
 
-    await signInWith(page, DEMO_PLAYER, 'Fan12345');
-    await expect(page.getByText(/Incorrect email or password/)).toBeVisible();
+      await signInWith(page, DEMO_PLAYER, 'Fan12345');
+      await expect(page.getByText(/Incorrect email or password/)).toBeVisible();
 
-    await signInWith(page, DEMO_PLAYER, 'Rotated456');
-    await expect(page).not.toHaveURL(/\/auth/);
-
-    // Restore the demo account's password. It's a fixed, shared credential (the
-    // login screen's own quick-fill button, and every other test's signIn()
-    // helper, hardcode 'Fan12345') against one real, persistent database — leaving
-    // it rotated here would silently break every test that runs after this one.
-    await page.goto('/account/security');
-    await page.getByLabel('Current password').fill('Rotated456');
-    await page.getByLabel('New password', { exact: true }).fill('Fan12345');
-    await page.getByLabel('Confirm new password').fill('Fan12345');
-    await page.getByRole('button', { name: /Update Password/ }).click();
-    await expect(page.getByText('Password updated')).toBeVisible();
+      await signInWith(page, DEMO_PLAYER, 'Rotated456');
+      await expect(page).not.toHaveURL(/\/auth/);
+    } finally {
+      // Restore via direct API calls rather than the UI: a UI-driven restore
+      // (fill/click/check-for-toast) has exactly the timing hazard this file
+      // fixes elsewhere — the toast can render after a short isVisible()
+      // check gives up, which reads as failure even though the mutation
+      // landed, sending a second attempt in with the wrong current password
+      // and leaving the account rotated for every later test. Signing in via
+      // the API tells us the real state with no UI involved.
+      const rotatedSignIn = await page.request.post('/api/auth.signIn', {
+        data: { email: DEMO_PLAYER, password: 'Rotated456' },
+      });
+      const rotatedBody = await rotatedSignIn.json().catch(() => null);
+      if (rotatedBody?.result?.data?.profile) {
+        const restore = await page.request.post('/api/auth.changePassword', {
+          data: { currentPassword: 'Rotated456', newPassword: 'Fan12345' },
+        });
+        if (!restore.ok()) throw new Error(`security.spec.ts: failed to restore demo password (${restore.status()})`);
+      }
+      // else: current password is already 'Fan12345' (either the rotation
+      // above never landed, or a prior restore already ran) — nothing to do.
+    }
   });
 
   test('verifies a contact channel with the issued code', async ({ page }) => {
@@ -98,7 +115,8 @@ test.describe('account security', () => {
     // not isolated per test — clear out anything left over from earlier runs
     // first, via a direct API call (shares page's cookie jar) rather than the
     // UI, so this doesn't depend on the session list's own load timing.
-    await page.request.post('/api/auth.revokeOtherSessions', { data: {} });
+    const cleanup = await page.request.post('/api/auth.revokeOtherSessions', { data: {} });
+    expect(cleanup.ok()).toBe(true);
 
     // A second device is a second browser context with its own cookie jar,
     // signed in to the same account — exactly how a real second device behaves.
@@ -129,7 +147,8 @@ test.describe('account security', () => {
     await signIn(page);
 
     // Same shared-account cleanup as the previous test, same reasoning.
-    await page.request.post('/api/auth.revokeOtherSessions', { data: {} });
+    const cleanup = await page.request.post('/api/auth.revokeOtherSessions', { data: {} });
+    expect(cleanup.ok()).toBe(true);
 
     const otherContext = await browser.newContext();
     const otherPage = await otherContext.newPage();

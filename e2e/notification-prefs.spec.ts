@@ -111,10 +111,18 @@ test.describe('notification preferences', () => {
     // runFor() resolves once virtual time has advanced and the sweep's timer
     // callback has been scheduled — it does NOT wait for that callback's own
     // async work to finish. The sweep now does a real network round trip
-    // (notifPrefsFor) before pushing the notification, so without a beat of
-    // real wall-clock time here, the immediate page.goto() below tears down
-    // the page mid-fetch and the notification never gets written.
-    await page.waitForTimeout(500);
+    // (notifPrefsFor) before pushing the notification, so navigating away
+    // immediately tears the page down mid-fetch and the notification never
+    // gets written. Poll the actual write target instead of guessing a fixed
+    // sleep long enough to cover it.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const notifs = JSON.parse(localStorage.getItem('oddwave:v1:notifs') ?? '[]') as Array<{ title: string }>;
+          return notifs.some((n) => n.title === 'Withdrawal approved');
+        })
+      )
+      .toBe(true);
 
     await page.goto('/notifications');
     await expect(page.getByRole('main').getByText('Withdrawal approved')).toBeVisible({ timeout: 10_000 });
