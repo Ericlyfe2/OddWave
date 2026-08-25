@@ -72,7 +72,17 @@ test.describe('account security', () => {
         const restore = await page.request.post('/api/auth.changePassword', {
           data: { currentPassword: 'Rotated456', newPassword: 'Fan12345' },
         });
-        if (!restore.ok()) throw new Error(`security.spec.ts: failed to restore demo password (${restore.status()})`);
+        // changePassword reports failure in a 200 body ({ error }), not an
+        // HTTP status — restore.ok() alone can't see that.
+        const restoreBody = await restore.json().catch(() => null);
+        if (!restore.ok() || restoreBody?.result?.data?.error) {
+          // A throw here would replace a real assertion failure from the try
+          // block above with this one, hiding the actual cause — log instead
+          // so the restore failure is still visible without masking it.
+          console.error(
+            `security.spec.ts: failed to restore demo password (status ${restore.status()}, body: ${JSON.stringify(restoreBody)})`
+          );
+        }
       }
       // else: current password is already 'Fan12345' (either the rotation
       // above never landed, or a prior restore already ran) — nothing to do.

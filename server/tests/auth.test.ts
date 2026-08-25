@@ -249,14 +249,17 @@ describe('session management', () => {
 
     await caller.auth.revokeOtherSessions();
 
-    // changePassword goes through protectedProcedure directly — assert it
-    // first, before anything else touches otherSession, so this covers
-    // protectedProcedure's own DeviceSession check rather than riding on
-    // me()'s `ctx.session.destroy()` having already emptied the session.
+    // Two independent callers over separate copies of the post-signIn
+    // session data — otherCaller's own toFakeSession(otherSession) mutates
+    // otherSession in place on destroy(), so reusing the same caller for
+    // both checks would let changePassword's destroy silently satisfy the
+    // me() check below without me's own DeviceSession lookup ever running.
+    // Each caller here must independently prove its own procedure's gate.
+    const meCaller = callerWithSession({ ...otherSession });
     await expect(otherCaller.auth.changePassword({ currentPassword: 'x', newPassword: 'y' })).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
-    expect(await otherCaller.auth.me()).toBeNull();
+    expect(await meCaller.auth.me()).toBeNull();
   });
 });
 
