@@ -192,7 +192,12 @@ export const useBets = create<BetsState>((set, get) => ({
 
     wallet.applyStake(profile.id, totalStake, bookingCode, bonusToUse);
     if (bonusToUse > 0) {
-      useAuth.getState().updateProfile({ bonusBalance: round2(profile.bonusBalance - bonusToUse) });
+      // spendBonus, not updateProfile: the server no longer accepts a
+      // client-supplied bonusBalance (that was a mintable-balance hole),
+      // and updateProfile's response would otherwise overwrite the local
+      // profile with the un-debited balance, making bonus stakes free and
+      // infinitely reusable.
+      useAuth.getState().spendBonus(bonusToUse);
     }
 
     useNotifs.getState().push({

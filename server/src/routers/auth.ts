@@ -156,7 +156,7 @@ export const authRouter = router({
           .object({
             depositLimit: z.number().min(10).nullable(),
             lossLimit: z.number().min(10).nullable(),
-            sessionReminderMin: z.number().positive().nullable(),
+            sessionReminderMin: z.number().int().positive().nullable(),
             selfExcludedUntil: z.number().nullable(),
           })
           .partial()
@@ -197,6 +197,27 @@ export const authRouter = router({
         });
       }
       return loadProfile(ctx.db, user.id);
+    }),
+
+  // Deliberately separate from updateProfile, and debit-only: crediting
+  // bonusBalance from the client is exactly the mintable-balance hole
+  // updateProfile used to have. Spending it back down is safe by
+  // construction because the amount actually deducted is clamped to what
+  // the account already has — a caller can never end up with more bonus
+  // balance than they started with, only less.
+  spendBonus: protectedProcedure
+    .input(z.object({ amount: z.number().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({ where: { id: ctx.currentUser.id } });
+      const available = Number(user?.bonusBalance ?? 0);
+      const spent = Math.min(Math.round(input.amount * 100) / 100, available);
+      if (spent > 0) {
+        await ctx.db.user.update({
+          where: { id: ctx.currentUser.id },
+          data: { bonusBalance: Math.round((available - spent) * 100) / 100 },
+        });
+      }
+      return loadProfile(ctx.db, ctx.currentUser.id);
     }),
 
   changePassword: protectedProcedure

@@ -10,6 +10,7 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   updateProfile: (patch: Partial<Profile>) => Promise<void>;
+  spendBonus: (amount: number) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; resetCode?: string; error?: string }>;
   resetPassword: (email: string, code: string, newPassword: string) => Promise<{ error?: string }>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ error?: string }>;
@@ -58,6 +59,11 @@ export const useAuth = create<AuthState>((set) => ({
 
   updateProfile: async (patch) => {
     const profile = await trpcClient.auth.updateProfile.mutate(patch as never);
+    set({ profile });
+  },
+
+  spendBonus: async (amount) => {
+    const profile = await trpcClient.auth.spendBonus.mutate({ amount });
     set({ profile });
   },
 

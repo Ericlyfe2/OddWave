@@ -30,20 +30,28 @@ export function ResponsibleGamingScreen() {
     setError(null);
     const dep = depositLimit === '' ? null : Number(depositLimit);
     const loss = lossLimit === '' ? null : Number(lossLimit);
-    const rem = reminder === '' ? null : Number(reminder);
+    const rem = reminder === '' ? null : Math.round(Number(reminder));
     if ((dep !== null && (dep < 10 || !Number.isFinite(dep))) || (loss !== null && (loss < 10 || !Number.isFinite(loss)))) {
       setError('Minimum limit is 10 GH₵');
       return;
     }
-    await updateProfile({
-      rgLimits: {
-        ...profile.rgLimits,
-        depositLimit: dep,
-        lossLimit: loss,
-        sessionReminderMin: rem,
-      },
-    });
-    toast('success', 'Limits updated');
+    if (rem !== null && (rem < 1 || !Number.isFinite(rem))) {
+      setError('Reminder must be at least 1 minute');
+      return;
+    }
+    try {
+      await updateProfile({
+        rgLimits: {
+          ...profile.rgLimits,
+          depositLimit: dep,
+          lossLimit: loss,
+          sessionReminderMin: rem,
+        },
+      });
+      toast('success', 'Limits updated');
+    } catch {
+      setError('Could not save limits — try again');
+    }
   };
 
   const isExcluded = !!profile.rgLimits.selfExcludedUntil && profile.rgLimits.selfExcludedUntil > Date.now();
@@ -112,10 +120,14 @@ export function ResponsibleGamingScreen() {
             variant="danger"
             className="flex-1"
             onClick={async () => {
-              await updateProfile({ rgLimits: { ...profile.rgLimits, selfExcludedUntil: Date.now() + 182 * 86400000 } });
-              setExcludeOpen(false);
-              toast('info', 'Self-exclusion activated');
-              navigate('/');
+              try {
+                await updateProfile({ rgLimits: { ...profile.rgLimits, selfExcludedUntil: Date.now() + 182 * 86400000 } });
+                setExcludeOpen(false);
+                toast('info', 'Self-exclusion activated');
+                navigate('/');
+              } catch {
+                toast('error', 'Could not activate self-exclusion — try again');
+              }
             }}
           >
             I Understand — Exclude Me

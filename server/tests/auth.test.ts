@@ -194,6 +194,20 @@ describe('auth.me / signOut / updateProfile', () => {
     expect(updated2?.rgLimits.lossLimit).toBe(50);
   });
 
+  it('spendBonus decrements bonusBalance and clamps to what is actually available', async () => {
+    const { caller } = await signedInCaller();
+    await db.user.update({ where: { id: (await caller.auth.me())!.id }, data: { bonusBalance: 30 } });
+
+    const afterFirstSpend = await caller.auth.spendBonus({ amount: 12 });
+    expect(afterFirstSpend?.bonusBalance).toBe(18);
+
+    // Regression: spendBonus must clamp to the real balance, not go negative
+    // — it's debit-only, so a caller can never end up with more than they
+    // started with, but a naive `balance - amount` could go below zero.
+    const overspend = await caller.auth.spendBonus({ amount: 1000 });
+    expect(overspend?.bonusBalance).toBe(0);
+  });
+
   it('self-exclusion set via updateProfile blocks a later signIn', async () => {
     const { caller } = await signedInCaller();
     await caller.auth.updateProfile({ rgLimits: { selfExcludedUntil: Date.now() + 86_400_000 } });
