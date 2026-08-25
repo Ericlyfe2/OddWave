@@ -1,6 +1,6 @@
 import type { Bet, BetLeg, Match } from './types';
 import { round2 } from './format';
-import { outcomeResult } from './liveEngine';
+import { outcomeResult } from './outcomes';
 
 export interface SettledBet extends Bet {
   payout?: number;

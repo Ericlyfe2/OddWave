@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { outcomeResult } from '../src/lib/liveEngine';
+import { outcomeResult } from '../src/lib/outcomes';
 import type { Match } from '../src/lib/types';
 
 function finishedMatch(home: number, away: number): Match {
