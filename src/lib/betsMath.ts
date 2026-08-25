@@ -1,4 +1,4 @@
-import { LIMITS } from './config';
+import { LIMITS } from './limits';
 import type { Bet, BetLeg, SlipItem } from './types';
 import { round2 } from './format';
 

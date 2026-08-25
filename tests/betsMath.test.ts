@@ -8,7 +8,7 @@ import {
   validateStake,
   validateSlipSelections,
 } from '../src/lib/betsMath';
-import { LIMITS } from '../src/lib/config';
+import { LIMITS } from '../src/lib/limits';
 import type { SlipItem } from '../src/lib/types';
 
 function item(overrides: Partial<SlipItem> = {}): SlipItem {
