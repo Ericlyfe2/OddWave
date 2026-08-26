@@ -30,6 +30,11 @@ class InsufficientBalanceError extends Error {
  *  double-refunding a void). */
 class BetNotActiveError extends Error {}
 
+/** Thrown inside `place`'s `$transaction` callback when the user's daily
+ *  net-loss limit (set via Responsible Gaming) would be exceeded by this
+ *  stake. */
+class LossLimitExceededError extends Error {}
+
 const matchStatusSchema = z.enum(['upcoming', 'live', 'finished', 'postponed', 'cancelled']);
 
 const matchSnapshotInput = z.object({
@@ -93,6 +98,14 @@ export const betsRouter = router({
       const selectionCheck = validateSlipSelections(legs, type);
       if (!selectionCheck.ok) return { ok: false, error: selectionCheck.error };
 
+      if (ctx.currentUser.suspended) {
+        return { ok: false, error: 'Account suspended. Contact support.' };
+      }
+      const rgLimits = await ctx.db.rgLimits.findUnique({ where: { userId: ctx.currentUser.id } });
+      if (rgLimits?.selfExcludedUntil && rgLimits.selfExcludedUntil > new Date()) {
+        return { ok: false, error: 'You are self-excluded from betting' };
+      }
+
       for (const leg of legs) {
         if (leg.matchStatus === 'cancelled' || leg.matchStatus === 'postponed') {
           return { ok: false, error: `Event unavailable: ${leg.matchName}` };
@@ -145,10 +158,26 @@ export const betsRouter = router({
           const currentBonusBalance = Number(lockedUsers[0]?.bonusBalance ?? 0);
 
           const successTxns = await tx.txn.findMany({ where: { userId: ctx.currentUser.id, status: 'success' } });
-          const available = round2(successTxns.reduce((sum, t) => sum + Number(t.amount), 0));
+          const pendingWithdrawals = await tx.txn.findMany({
+            where: { userId: ctx.currentUser.id, type: 'withdrawal', status: 'pending' },
+          });
+          const locked = round2(pendingWithdrawals.reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0));
+          const available = round2(successTxns.reduce((sum, t) => sum + Number(t.amount), 0) - locked);
 
           const bonusToUse = Math.min(round2(useBonus), currentBonusBalance, totalStake);
           const cashNeeded = round2(totalStake - bonusToUse);
+
+          if (rgLimits?.lossLimit != null) {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todaysNet = successTxns
+              .filter((t) => t.createdAt >= todayStart)
+              .reduce((sum, t) => sum + Number(t.amount), 0);
+            if (-todaysNet + cashNeeded > Number(rgLimits.lossLimit)) {
+              throw new LossLimitExceededError();
+            }
+          }
+
           if (cashNeeded > available) {
             throw new InsufficientBalanceError(available);
           }
@@ -215,6 +244,9 @@ export const betsRouter = router({
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
           return { ok: false, error: `Insufficient balance. Available: ${err.available.toFixed(2)}` };
+        }
+        if (err instanceof LossLimitExceededError) {
+          return { ok: false, error: 'Daily loss limit reached. Visit Responsible Gaming.' };
         }
         throw err;
       }
@@ -349,16 +381,19 @@ export const betsRouter = router({
             },
           });
           if (next.status !== 'open' && next.payout && next.payout > 0) {
-            await tx.txn.create({
-              data: {
-                userId: bet.userId,
-                type: 'payout',
-                amount: round2(next.payout),
-                status: 'success',
-                ref: `WIN-${bet.bookingCode}`,
-                resolvedAt: new Date(),
-              },
-            });
+            const cashPayout = round2(next.payout - (bet.usedBonus ?? 0));
+            if (cashPayout > 0) {
+              await tx.txn.create({
+                data: {
+                  userId: bet.userId,
+                  type: 'payout',
+                  amount: cashPayout,
+                  status: 'success',
+                  ref: `WIN-${bet.bookingCode}`,
+                  resolvedAt: new Date(),
+                },
+              });
+            }
           }
           return true;
         });

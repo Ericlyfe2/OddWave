@@ -10,8 +10,19 @@ export async function sweepWithdrawals(db: Context['db']): Promise<number> {
   const pending = await db.txn.findMany({
     where: { type: 'withdrawal', status: 'pending', createdAt: { lte: cutoff } },
   });
+  let approved = 0;
   for (const txn of pending) {
-    await db.txn.update({ where: { id: txn.id }, data: { status: 'success', resolvedAt: new Date() } });
+    const didApprove = await db.$transaction(async (tx) => {
+      const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "Txn" WHERE "id" = ${txn.id} FOR UPDATE
+      `;
+      if (lockedRows.length === 0) return false;
+      const fresh = await tx.txn.findUnique({ where: { id: txn.id } });
+      if (!fresh || fresh.status !== 'pending') return false;
+      await tx.txn.update({ where: { id: txn.id }, data: { status: 'success', resolvedAt: new Date() } });
+      return true;
+    });
+    if (didApprove) approved += 1;
   }
-  return pending.length;
+  return approved;
 }

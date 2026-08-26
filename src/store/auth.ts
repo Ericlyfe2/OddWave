@@ -36,8 +36,10 @@ export const useAuth = create<AuthState>((set) => ({
       const profile = await trpcClient.auth.me.query();
       set({ profile, ready: true });
       if (profile) {
-        await useWallet.getState().hydrate(profile.id);
-        await useBets.getState().hydrate();
+        await Promise.all([
+          useWallet.getState().hydrate(profile.id).catch(() => undefined),
+          useBets.getState().hydrate().catch(() => undefined),
+        ]);
       }
     } catch {
       set({ profile: null, ready: true });

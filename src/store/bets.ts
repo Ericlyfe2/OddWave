@@ -89,17 +89,16 @@ export const useBets = create<BetsState>((set, get) => ({
   },
 
   settleOnMatchFinish: async (matchId) => {
+    const profile = useAuth.getState().profile;
+    if (!profile) return;
     const snapshot = liveEngine.get(matchId);
     if (!snapshot) return;
-    const before = get().bets;
+    const before = get().bets.filter((b) => b.legs.some((l) => l.matchId === matchId));
     const result = await trpcClient.bets.settle.mutate({ match: snapshot });
     if (result.settledCount === 0) return;
     await get().hydrate();
-
-    const profile = useAuth.getState().profile;
-    if (!profile) return;
     await useWallet.getState().hydrate(profile.id).catch(() => undefined);
-    const after = get().bets;
+    const after = get().bets.filter((b) => b.legs.some((l) => l.matchId === matchId));
 
     for (const bet of after) {
       if (bet.userId !== profile.id) continue;

@@ -2,8 +2,6 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Check, X, UserCog, Coins, ShieldCheck, Ticket, Ban, Gift, Plus, Pencil, Trash2, EyeOff, Eye } from 'lucide-react';
-import { useWallet } from '@/store/wallet';
-import { useAuth } from '@/store/auth';
 import { usePromotions, type PromotionInput } from '@/store/promotions';
 import type { Promotion, PromoKind } from '@/lib/types';
 import { money, timeAgoLabel } from '@/lib/format';
@@ -125,16 +123,20 @@ function UsersAdmin() {
   const updateUser = trpc.admin.updateUser.useMutation({
     onSuccess: () => utils.admin.listUsers.invalidate(),
   });
-  const wallet = useWallet();
-  const profile = useAuth((s) => s.profile);
+  const userIds = useMemo(() => profiles.map((p) => p.id), [profiles]);
+  const { data: balances = [], refetch: refetchBalances } = trpc.wallet.balancesFor.useQuery(
+    { userIds },
+    { enabled: userIds.length > 0 }
+  );
+  const balanceById = useMemo(() => new Map(balances.map((b) => [b.userId, b])), [balances]);
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [amount, setAmount] = useState('25');
 
   return (
     <div className="px-3 pt-3 space-y-2">
       {profiles.map((p) => {
-        const bal = wallet.balanceOf(p.id);
-        const locked = wallet.lockedOf(p.id);
+        const bal = balanceById.get(p.id)?.balance ?? 0;
+        const locked = balanceById.get(p.id)?.locked ?? 0;
         return (
           <div key={p.id} className="rounded-xl border border-ink-500/40 bg-ink-600 p-3">
             <div className="flex items-center justify-between gap-2">
@@ -173,11 +175,7 @@ function UsersAdmin() {
                         amount: amt,
                         reason: amt > 0 ? 'Admin credit adjustment' : 'Admin debit adjustment',
                       });
-                      // Same listTxns scoping limitation as the withdrawal queue above:
-                      // this refreshes the admin's own wallet state, not p.id's — the
-                      // Bal/Locked figures shown here for other users don't update live
-                      // until that user is hydrated (see UsersAdmin's known-gap note).
-                      if (profile) await wallet.hydrate(profile.id);
+                      await refetchBalances();
                     }
                     setAdjusting(null);
                   }}

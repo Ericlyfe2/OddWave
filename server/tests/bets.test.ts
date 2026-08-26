@@ -111,6 +111,63 @@ describe('bets.place', () => {
     expect(bets).toHaveLength(0);
   });
 
+  it('rejects a bet from a suspended account', async () => {
+    const caller = await signedInCaller();
+    await db.user.update({ where: { email: 'bets-user@example.com' }, data: { suspended: true } });
+    // `validateSession` (server/src/session.ts) already re-checks
+    // `user.suspended` fresh from the DB on every protected call, so a
+    // suspension invalidates the session at the middleware layer before the
+    // request ever reaches `bets.place`'s own suspension guard below — it's
+    // rejected one layer earlier with UNAUTHORIZED. The in-mutation check
+    // stays in place as defense-in-depth in case that invariant changes.
+    await expect(caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+  });
+
+  it('rejects a bet from a self-excluded account', async () => {
+    const caller = await signedInCaller();
+    const me = await caller.auth.me();
+    await db.rgLimits.upsert({
+      where: { userId: me!.id },
+      create: { userId: me!.id, selfExcludedUntil: new Date(Date.now() + 3_600_000) },
+      update: { selfExcludedUntil: new Date(Date.now() + 3_600_000) },
+    });
+    const result = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/self-excluded/i);
+  });
+
+  it('rejects a bet that would push today\'s net losses past the daily loss limit', async () => {
+    const caller = await signedInCaller();
+    const me = await caller.auth.me();
+    await db.rgLimits.upsert({
+      where: { userId: me!.id },
+      create: { userId: me!.id, lossLimit: 15 },
+      update: { lossLimit: 15 },
+    });
+    // signedInCaller's initial 100 deposit is itself a positive success Txn
+    // dated today, so today's net is currently +100 before any stake. The
+    // stake here (150, well past the 100 balance too — loss-limit is
+    // checked before the balance check, so this still exercises the limit
+    // rather than tripping InsufficientBalanceError first) must be large
+    // enough that -100 (net) + 150 (stake) = 50 exceeds the 15 loss limit.
+    const result = await caller.bets.place({ type: 'single', stakePerCombo: 150, legs: [openLeg()] });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Daily loss limit reached/);
+  });
+
+  it('excludes a pending withdrawal from the balance available for a new bet', async () => {
+    const caller = await signedInCaller();
+    // Balance is 100. Lock 70 of it in a pending withdrawal, leaving 30
+    // available — a 40 stake must be rejected even though the raw balance
+    // (ignoring the lock) would cover it.
+    await caller.wallet.requestWithdrawal({ amount: 70, momoNumber: '0244567890' });
+    const result = await caller.bets.place({ type: 'single', stakePerCombo: 40, legs: [openLeg()] });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Insufficient balance/);
+  });
+
   it('rejects both concurrent requests rather than overdrawing when two place calls race on the same balance', async () => {
     const caller = await signedInCaller();
     // Balance is 100. Two concurrent single bets at 60 each would both pass
@@ -210,6 +267,25 @@ describe('bets.settle', () => {
     expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('won');
     const txns = await caller.wallet.listTxns();
     expect(txns.find((t) => t.type === 'payout')?.amount).toBe(20);
+  });
+
+  it('credits only stake minus usedBonus on a win, not the full payout', async () => {
+    const caller = await signedInCaller();
+    await db.user.update({ where: { email: 'bets-user@example.com' }, data: { bonusBalance: 4 } });
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()], useBonus: 4 });
+
+    await caller.bets.settle({
+      match: { id: 'm1', status: 'finished', score: { home: 1, away: 0 }, markets: [] },
+    });
+
+    const bets = await caller.bets.listBets();
+    const bet = bets.find((b) => b.id === placed.betIds![0])!;
+    expect(bet.status).toBe('won');
+    expect(bet.payout).toBe(20);
+    const txns = await caller.wallet.listTxns();
+    // Full payout is 20 (10 stake * 2.0 odds); 4 of the stake was
+    // bonus-funded, so only 16 should be credited as real cash.
+    expect(txns.find((t) => t.type === 'payout')?.amount).toBe(16);
   });
 
   it('ignores bets that reference a different match', async () => {

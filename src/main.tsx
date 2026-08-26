@@ -18,7 +18,9 @@ async function boot() {
   await useAuth.getState().init();
   useMatches.getState().init();
   // Settle open bets the moment the live engine finishes a match.
-  useMatches.getState().onFinish((matchId) => useBets.getState().settleOnMatchFinish(matchId));
+  useMatches.getState().onFinish((matchId) => {
+    void useBets.getState().settleOnMatchFinish(matchId).catch(() => undefined);
+  });
   installBookingBridge();
   installSlipOwnerSync();
   startWithdrawalNotificationPoller();
