@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { signIn, signOut, deposit, openScheduledMatch, openBetslip, betslip, selectFirstOdds, DEMO_ADMIN } from './helpers';
+import { signIn, signOut, deposit, readBalance, openScheduledMatch, openBetslip, betslip, selectFirstOdds, DEMO_ADMIN } from './helpers';
 
 test.describe('booking codes', () => {
   test('saves a slip to a code and reloads it', async ({ page }) => {
@@ -37,8 +37,12 @@ test.describe('booking codes', () => {
 test.describe('wallet', () => {
   test('deposit and withdrawal both move the ledger', async ({ page }) => {
     await signIn(page);
+    // Shared, persistent demo wallet — assert the deposit's effect as a
+    // delta, not an absolute figure (see betting.spec.ts for the same
+    // reasoning).
+    const before = await readBalance(page);
     await deposit(page, 500);
-    await expect(page.getByRole('main').getByText('500.00 GH₵').first()).toBeVisible();
+    await expect(page.getByRole('main').getByText(`${(before + 500).toFixed(2)} GH₵`).first()).toBeVisible();
 
     await page.goto('/account/withdraw');
     await page.getByLabel('Withdrawal amount').fill('100');

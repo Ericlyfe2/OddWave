@@ -228,6 +228,18 @@ export const betsRouter = router({
     return bets.map(mapBet);
   }),
 
+  // Admin-only, cross-user — listBets is self-scoped by design
+  // (protectedProcedure has no way to see another user's bets), so the
+  // admin bet-management screen needs its own query rather than reusing
+  // listBets under an admin's own session.
+  listOpenBets: adminProcedure.query(async ({ ctx }) => {
+    const bets = await ctx.db.bet.findMany({
+      where: { status: 'open' },
+      orderBy: { placedAt: 'desc' },
+    });
+    return bets.map(mapBet);
+  }),
+
   cashOut: protectedProcedure
     .input(z.object({ betId: z.string(), portion: z.number().min(0).max(1), matches: z.array(matchSnapshotInput) }))
     .mutation(async ({ ctx, input }) => {

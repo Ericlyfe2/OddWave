@@ -48,6 +48,13 @@ async function upsertDemo(
     update: { betUpdates: true, promotions: true, liveEvents: true },
     create: { userId: user.id },
   });
+  // Same reasoning again: Txn/Bet rows accumulate forever otherwise — every
+  // e2e run that deposits/bets against a demo account leaves its ledger and
+  // bet history in place for the next run, so balances climb unboundedly and
+  // any test asserting an exact wallet figure eventually breaks against
+  // nothing it did wrong. Wipe both on every reseed.
+  await db.txn.deleteMany({ where: { userId: user.id } });
+  await db.bet.deleteMany({ where: { userId: user.id } });
 }
 
 async function main() {

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { signIn, deposit, openScheduledMatch, openBetslip, betslip } from './helpers';
+import { signIn, deposit, openScheduledMatch, openBetslip, betslip, DEMO_ADMIN } from './helpers';
 
 // Reads the stored notification count directly rather than navigating to
 // /account and scraping its badge text: that extra page hop was interacting
@@ -86,16 +86,18 @@ test.describe('notification preferences', () => {
     await expect(page.getByRole('main').getByText('Deposit').first()).toBeVisible();
   });
 
-  test('the withdrawal-approved notice is correctly categorized, not shown as a deposit', async ({ page }) => {
-    // The real auto-approve sweep only fires WITHDRAWAL_AUTO_APPROVE_MS
-    // (2 minutes) after the request. A localStorage rewrite can't fake that:
-    // the sweep reads the already-running zustand store's in-memory state,
-    // which a raw storage write never touches. Playwright's clock replaces
-    // the page's own Date/timers, so advancing it genuinely ages the request
-    // and fires the interval-based sweep — install it before anything else
-    // starts so the whole page (including the store's initial load) runs on it.
-    await page.clock.install();
-
+  test('the withdrawal-approved notice is correctly categorized, not shown as a deposit', async ({ page, browser }) => {
+    // The withdrawal auto-approve sweep is a real server-side process now
+    // (server/src/walletSweep.ts, a genuine setInterval in the Node process),
+    // not client-driven state a fake clock can fast-forward — page.clock
+    // only fakes THIS page's own timers, and has no effect on the server, so
+    // advancing it does nothing to actually age and approve the request.
+    // Trigger the approval directly via an admin (same effect the real
+    // sweep has, immediately, instead of waiting out its real 2-minute
+    // threshold), then wait on this page's own real notification poller
+    // (src/store/wallet.ts's startWithdrawalNotificationPoller, a real 15s
+    // client-side interval) to pick up the change and notify — that's the
+    // actual client behavior this test exists to verify.
     await signIn(page);
     await deposit(page, 100);
 
@@ -104,23 +106,24 @@ test.describe('notification preferences', () => {
     await page.getByRole('button', { name: 'Request Withdrawal' }).click();
     await expect(page.getByText(/Withdrawal Requested|on the way|pending/i).first()).toBeVisible({ timeout: 15_000 });
 
-    // Advance past the auto-approve threshold, letting the sweep's setInterval
-    // actually fire along the way rather than just jumping the clock.
-    await page.clock.runFor(2 * 60_000 + 20_000);
+    const adminContext = await browser.newContext();
+    const adminPage = await adminContext.newPage();
+    await signIn(adminPage, DEMO_ADMIN);
+    await adminPage.goto('/admin?tab=withdrawals');
+    await adminPage.getByRole('button', { name: /Approve/ }).first().click();
+    await adminContext.close();
 
-    // runFor() resolves once virtual time has advanced and the sweep's timer
-    // callback has been scheduled — it does NOT wait for that callback's own
-    // async work to finish. The sweep now does a real network round trip
-    // (notifPrefsFor) before pushing the notification, so navigating away
-    // immediately tears the page down mid-fetch and the notification never
-    // gets written. Poll the actual write target instead of guessing a fixed
-    // sleep long enough to cover it.
+    // Poll the actual write target instead of guessing a fixed sleep long
+    // enough to cover one real poller tick (~15s) plus its own network
+    // round trip (notifPrefsFor) before the notification is written.
     await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const notifs = JSON.parse(localStorage.getItem('oddwave:v1:notifs') ?? '[]') as Array<{ title: string }>;
-          return notifs.some((n) => n.title === 'Withdrawal approved');
-        })
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const notifs = JSON.parse(localStorage.getItem('oddwave:v1:notifs') ?? '[]') as Array<{ title: string }>;
+            return notifs.some((n) => n.title === 'Withdrawal approved');
+          }),
+        { timeout: 30_000 }
       )
       .toBe(true);
 

@@ -29,6 +29,20 @@ export async function signOut(page: Page): Promise<void> {
   await expect(page.getByRole('link', { name: 'Login' }).first()).toBeVisible();
 }
 
+/**
+ * Reads the signed-in user's current wallet balance via a direct API call
+ * (shares the page's cookie jar) rather than scraping the UI. The demo
+ * account's wallet is one real, shared, persistent ledger — not a fresh
+ * per-browser-context balance — so tests that assert an exact figure after
+ * depositing need to know what it already was.
+ */
+export async function readBalance(page: Page): Promise<number> {
+  const res = await page.request.get('/api/wallet.listTxns?batch=1&input=%7B%7D');
+  const body = await res.json();
+  const txns: Array<{ status: string; amount: number }> = body[0]?.result?.data ?? [];
+  return Math.round(txns.filter((t) => t.status === 'success').reduce((sum, t) => sum + t.amount, 0) * 100) / 100;
+}
+
 /** Funds the wallet through the deposit screen so bets can actually be placed. */
 export async function deposit(page: Page, amount: number): Promise<void> {
   await page.goto('/account/deposit');

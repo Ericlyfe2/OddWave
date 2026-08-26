@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { signIn, signOut, deposit, openScheduledMatch, openBetslip, betslip, selectFirstOdds, DEMO_ADMIN } from './helpers';
+import { signIn, signOut, deposit, readBalance, openScheduledMatch, openBetslip, betslip, selectFirstOdds, DEMO_ADMIN } from './helpers';
 
 test.describe('admin bet management', () => {
   test('voiding a bet refunds the stake and moves it out of open bets', async ({ page }) => {
-    // Fan places a real bet.
+    // Fan places a real bet. Shared, persistent demo wallet — assert
+    // balance effects as deltas, not absolute figures (see betting.spec.ts).
     await signIn(page);
+    const before = await readBalance(page);
     await deposit(page, 100);
     await openScheduledMatch(page);
     await selectFirstOdds(page);
@@ -17,7 +19,7 @@ test.describe('admin bet management', () => {
     const code = (await page.getByRole('button', { name: 'Copy booking code' }).innerText()).trim();
 
     await page.goto('/account');
-    await expect(page.getByRole('main').getByText('80.00 GH₵').first()).toBeVisible();
+    await expect(page.getByRole('main').getByText(`${(before + 80).toFixed(2)} GH₵`).first()).toBeVisible();
 
     // Admin finds and voids that exact bet.
     await signOut(page);
@@ -40,10 +42,13 @@ test.describe('admin bet management', () => {
     await signOut(page);
     await signIn(page);
     await page.goto('/account');
-    await expect(page.getByRole('main').getByText('100.00 GH₵').first()).toBeVisible();
+    await expect(page.getByRole('main').getByText(`${(before + 100).toFixed(2)} GH₵`).first()).toBeVisible();
 
+    // Other tests in this run may have left their own open bets on this
+    // shared account, so check this specific bet is gone from Open rather
+    // than assuming the whole list is empty.
     await page.goto('/bets');
-    await expect(page.getByText('No open bets')).toBeVisible();
+    await expect(page.getByRole('main').getByText(code)).toHaveCount(0);
     await page.getByRole('tab', { name: 'Settled' }).click();
     await page.getByRole('button', { name: /^void$/i }).click();
     await expect(page.getByRole('main').getByText(code)).toBeVisible();

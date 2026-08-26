@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { Check, X, UserCog, Coins, ShieldCheck, Ticket, Ban, Gift, Plus, Pencil, Trash2, EyeOff, Eye } from 'lucide-react';
 import { useWallet } from '@/store/wallet';
-import { useBets } from '@/store/bets';
 import { useAuth } from '@/store/auth';
 import { usePromotions, type PromotionInput } from '@/store/promotions';
 import type { Promotion, PromoKind } from '@/lib/types';
@@ -56,9 +55,12 @@ export function AdminOps() {
 }
 
 function WithdrawalsQueue() {
-  const wallet = useWallet();
-  const profile = useAuth((s) => s.profile);
-  const pending = wallet.pendingWithdrawals();
+  // wallet.pendingWithdrawals() only ever reflects the admin's OWN txns
+  // (listTxns is self-scoped server-side, by design — an admin can't just
+  // read another user's ledger through the same query a regular user uses),
+  // so it can never show a fan's pending withdrawal. Admin needs its own
+  // cross-user query.
+  const { data: pending = [], refetch } = trpc.wallet.listPendingWithdrawals.useQuery();
 
   if (pending.length === 0) {
     return (
@@ -90,10 +92,7 @@ function WithdrawalsQueue() {
                 className="flex-1"
                 onClick={async () => {
                   await trpcClient.wallet.resolveWithdrawal.mutate({ txnId: t.id, approve: true });
-                  // listTxns is scoped to the signed-in user server-side — there's
-                  // no admin endpoint yet to refetch another user's ledger, so this
-                  // only refreshes the admin's own view, not the target user's.
-                  if (profile) await wallet.hydrate(profile.id);
+                  await refetch();
                 }}
               >
                 <Check className="w-3.5 h-3.5" /> Approve
@@ -104,7 +103,7 @@ function WithdrawalsQueue() {
                 className="flex-1"
                 onClick={async () => {
                   await trpcClient.wallet.resolveWithdrawal.mutate({ txnId: t.id, approve: false });
-                  if (profile) await wallet.hydrate(profile.id);
+                  await refetch();
                 }}
               >
                 <X className="w-3.5 h-3.5" /> Reject & Refund
@@ -224,14 +223,13 @@ function MiniBtn({ children, onClick, disabled }: { children: React.ReactNode; o
 const VOID_REASONS = ['Suspicious activity', 'Trading error', 'Duplicate bet', 'Customer request'] as const;
 
 function BetsAdmin() {
-  const bets = useBets((s) => s.bets);
+  // useBets's own store is self-scoped to whoever is signed in (listBets is
+  // protectedProcedure, by design) — an admin's own bets store never
+  // contains other users' bets, so this screen needs the cross-user
+  // admin query instead.
+  const { data: open = [], refetch } = trpc.bets.listOpenBets.useQuery();
   const { data: profiles = [] } = trpc.admin.listUsers.useQuery();
   const profileById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
-
-  const open = useMemo(
-    () => bets.filter((b) => b.status === 'open').sort((a, b) => b.placedAt - a.placedAt),
-    [bets]
-  );
 
   const [target, setTarget] = useState<string | null>(null);
   const [reason, setReason] = useState<string>(VOID_REASONS[0]);
@@ -240,7 +238,7 @@ function BetsAdmin() {
   const confirmVoid = async () => {
     if (!targetBet) return;
     await trpcClient.bets.voidBet.mutate({ betId: targetBet.id, reason });
-    await useBets.getState().hydrate();
+    await refetch();
     setTarget(null);
   };
 

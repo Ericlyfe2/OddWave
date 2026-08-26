@@ -244,8 +244,13 @@ export function SlipPanel({ onPlaced }: { onPlaced?: () => void }) {
         kickoff: i.kickoff,
         status: 'open' as const,
         matchStatus: match?.status ?? 'cancelled',
+        // Market.suspended is non-optional (always explicitly true/false), so
+        // a missing market genuinely means "treat as suspended". Outcome.suspended
+        // is optional — an available outcome simply never sets it, it isn't
+        // `false` — so `?? true` would wrongly flag every normal, sellable
+        // outcome as suspended. Only an explicit `true` counts.
         marketSuspended: market?.suspended ?? true,
-        outcomeSuspended: outcome?.suspended ?? true,
+        outcomeSuspended: !outcome ? true : outcome.suspended === true,
       };
     });
 

@@ -4,6 +4,7 @@ import { trpcClient } from '@/lib/trpc';
 import { liveEngine } from '@/lib/liveEngine';
 import type { MatchCashoutInput } from '@/lib/cashout';
 import { useAuth } from './auth';
+import { useWallet } from './wallet';
 import { useNotifs } from './notifs';
 import { logger } from '@/lib/logger';
 
@@ -48,6 +49,12 @@ export const useBets = create<BetsState>((set, get) => ({
 
     const profile = useAuth.getState().profile;
     if (profile) {
+      // The stake debit happened server-side in the same transaction as the
+      // bet — the wallet store has no idea that happened until it's told to
+      // refetch, so the balance shown anywhere in the app would stay stale
+      // until whatever next incidentally hydrates it (the withdrawal poller,
+      // up to 15s later).
+      await useWallet.getState().hydrate(profile.id);
       useNotifs.getState().push(
         { userId: profile.id, kind: 'bet_placed', title: 'Bet placed successfully', body: `Booking code sent` },
         profile.notifPrefs
@@ -71,6 +78,7 @@ export const useBets = create<BetsState>((set, get) => ({
 
     const profile = useAuth.getState().profile;
     if (profile) {
+      await useWallet.getState().hydrate(profile.id);
       useNotifs.getState().push(
         { userId: profile.id, kind: 'cashout', title: 'Cash out successful', body: `${result.amount!.toFixed(2)} credited to your wallet` },
         profile.notifPrefs
@@ -90,6 +98,7 @@ export const useBets = create<BetsState>((set, get) => ({
 
     const profile = useAuth.getState().profile;
     if (!profile) return;
+    await useWallet.getState().hydrate(profile.id);
     const after = get().bets;
 
     for (const bet of after) {

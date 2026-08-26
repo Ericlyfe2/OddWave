@@ -61,6 +61,19 @@ export const walletRouter = router({
     return txns.map(mapTxn);
   }),
 
+  // Admin-only, and deliberately separate from listTxns: that query is
+  // self-scoped to the caller (protectedProcedure has no way to see another
+  // user's ledger, by design), so the admin withdrawals queue needs its own
+  // cross-user query rather than reusing listTxns under an admin's own
+  // session.
+  listPendingWithdrawals: adminProcedure.query(async ({ ctx }) => {
+    const txns = await ctx.db.txn.findMany({
+      where: { type: 'withdrawal', status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+    });
+    return txns.map(mapTxn);
+  }),
+
   resolveWithdrawal: adminProcedure
     .input(z.object({ txnId: z.string(), approve: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
