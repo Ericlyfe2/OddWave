@@ -176,4 +176,23 @@ describe('bets.cashOut', () => {
     const second = await caller.bets.cashOut({ betId: placed.betIds![0], portion: 1, matches: [matchSnapshot()] });
     expect(second.ok).toBe(false);
   });
+
+  it('rejects one of two concurrent cash-outs on the same bet rather than double-crediting the wallet', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    // Two truly concurrent cashOut calls for the SAME bet must not both see
+    // status 'open': the row lock must serialize them so only one commits.
+    const [a, b] = await Promise.all([
+      caller.bets.cashOut({ betId: placed.betIds![0], portion: 1, matches: [matchSnapshot()] }),
+      caller.bets.cashOut({ betId: placed.betIds![0], portion: 1, matches: [matchSnapshot()] }),
+    ]);
+    const results = [a, b];
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    const failed = results.find((r) => !r.ok);
+    expect(failed?.ok).toBe(false);
+    expect((failed as { ok: false; error: string }).error).toMatch(/not active/i);
+
+    const txns = await caller.wallet.listTxns();
+    expect(txns.filter((t) => t.type === 'cashout')).toHaveLength(1);
+  });
 });
