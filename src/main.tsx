@@ -6,6 +6,7 @@ import './index.css';
 import { useAuth } from '@/store/auth';
 import { useMatches } from '@/store/matches';
 import { useBets } from '@/store/bets';
+import { startWithdrawalNotificationPoller } from '@/store/wallet';
 import { installBookingBridge } from '@/lib/bookingBridge';
 import { installSlipOwnerSync } from '@/store/slip';
 import { trpc, trpcClientConfig } from '@/lib/trpc';
@@ -20,6 +21,7 @@ async function boot() {
   useMatches.getState().onFinish((matchId) => useBets.getState().settleOnMatchFinish(matchId));
   installBookingBridge();
   installSlipOwnerSync();
+  startWithdrawalNotificationPoller();
 
   const root = createRoot(document.getElementById('root')!);
   root.render(

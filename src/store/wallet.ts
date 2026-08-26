@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { Txn } from '@/lib/types';
-import { round2 } from '@/lib/format';
+import { money, round2 } from '@/lib/format';
 import { trpcClient } from '@/lib/trpc';
+import { useAuth } from '@/store/auth';
+import { useNotifs } from '@/store/notifs';
 
 interface WalletState {
   txns: Record<string, Txn[]>;
@@ -28,6 +30,11 @@ export const useWallet = create<WalletState>((set, get) => ({
   deposit: async (userId, amount, provider) => {
     const txn = await trpcClient.wallet.deposit.mutate({ amount, provider });
     set({ txns: { ...get().txns, [userId]: [txn, ...(get().txns[userId] || [])] } });
+    const notifPrefs = useAuth.getState().profile?.notifPrefs ?? null;
+    useNotifs.getState().push(
+      { userId, kind: 'deposit', title: 'Deposit successful', body: `${money(txn.amount)} added to your wallet · Ref ${txn.ref}` },
+      notifPrefs
+    );
     return txn;
   },
 
@@ -55,3 +62,60 @@ export const useWallet = create<WalletState>((set, get) => ({
       list.filter((t) => t.type === 'withdrawal' && t.status === 'pending').map((t) => ({ ...t, userId }))
     ),
 }));
+
+let pollerStarted = false;
+
+/**
+ * The withdrawal auto-approve sweep now runs server-side (`server/src/index.ts`,
+ * every 15s — see `server/src/walletSweep.ts`) and only updates the `Txn` row;
+ * there's no server-to-client push in this architecture, so the client has no
+ * other way to learn a pending withdrawal just resolved. This polls the same
+ * cadence, hydrates the signed-in user's ledger, and diffs the previous
+ * `pending` withdrawals against the freshly-fetched list to notify on any
+ * transition to `success`/`failed`.
+ */
+export function startWithdrawalNotificationPoller(): void {
+  if (pollerStarted || typeof window === 'undefined') return;
+  pollerStarted = true;
+
+  const tick = async () => {
+    const userId = useAuth.getState().profile?.id;
+    if (!userId) return;
+    const before = useWallet.getState().txns[userId] || [];
+    await useWallet.getState().hydrate(userId);
+    const after = useWallet.getState().txns[userId] || [];
+    const notifPrefs = useAuth.getState().profile?.notifPrefs ?? null;
+
+    for (const txn of after) {
+      if (txn.type !== 'withdrawal') continue;
+      const prior = before.find((t) => t.id === txn.id);
+      if (!prior || prior.status !== 'pending' || txn.status === prior.status) continue;
+
+      if (txn.status === 'success') {
+        useNotifs.getState().push(
+          {
+            userId,
+            kind: 'withdrawal',
+            title: 'Withdrawal approved',
+            body: `${money(Math.abs(txn.amount))} sent via mobile money · Ref ${txn.ref}`,
+          },
+          notifPrefs
+        );
+      } else if (txn.status === 'failed') {
+        useNotifs.getState().push(
+          {
+            userId,
+            kind: 'withdrawal',
+            title: 'Withdrawal failed',
+            body: `${money(Math.abs(txn.amount))} could not be completed and was refunded · Ref ${txn.ref}`,
+          },
+          notifPrefs
+        );
+      }
+    }
+  };
+
+  setInterval(() => {
+    tick().catch((e) => console.error('[wallet] withdrawal notification poll failed', e));
+  }, 15_000);
+}
