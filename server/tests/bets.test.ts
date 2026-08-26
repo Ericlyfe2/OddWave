@@ -129,3 +129,51 @@ describe('bets.place', () => {
     expect(stakeTotal).toBe(-60);
   });
 });
+
+function matchSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'm1',
+    status: 'live' as const,
+    score: { home: 1, away: 0 },
+    minute: 60,
+    markets: [{ key: '1x2', suspended: false, outcomes: [{ code: '1', odds: 1.5, suspended: false }] }],
+    ...overrides,
+  };
+}
+
+describe('bets.listBets', () => {
+  it('returns only the caller\'s own bets, newest first', async () => {
+    const caller = await signedInCaller();
+    await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    const bets = await caller.bets.listBets();
+    expect(bets).toHaveLength(1);
+    expect(bets[0].userId).toBe((await caller.auth.me())!.id);
+  });
+});
+
+describe('bets.cashOut', () => {
+  it('credits the wallet and marks the bet cashed out on a full cash-out', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    const result = await caller.bets.cashOut({
+      betId: placed.betIds![0],
+      portion: 1,
+      matches: [matchSnapshot()],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.amount).toBeGreaterThan(0);
+
+    const bets = await caller.bets.listBets();
+    expect(bets[0].status).toBe('cashed_out');
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.type === 'cashout')?.amount).toBe(result.amount);
+  });
+
+  it('rejects cashing out a bet that is not open', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    await caller.bets.cashOut({ betId: placed.betIds![0], portion: 1, matches: [matchSnapshot()] });
+    const second = await caller.bets.cashOut({ betId: placed.betIds![0], portion: 1, matches: [matchSnapshot()] });
+    expect(second.ok).toBe(false);
+  });
+});

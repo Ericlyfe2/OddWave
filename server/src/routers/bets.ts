@@ -4,6 +4,8 @@ import { protectedProcedure, router } from '../trpc';
 import { round2 } from '../../../src/lib/format';
 import { LIMITS } from '../../../src/lib/limits';
 import { validateSlipSelections, validateStake, potentialFor } from '../../../src/lib/betsMath';
+import { cashoutValue, type MatchCashoutInput } from '../../../src/lib/cashout';
+import { mapBet } from '../mappers';
 import type { BetLeg } from '../../../src/lib/types';
 
 /** Thrown inside the `$transaction` callback to abort/rollback and signal
@@ -17,7 +19,29 @@ class InsufficientBalanceError extends Error {
   }
 }
 
+/** Thrown inside `cashOut`'s `$transaction` callback to abort/rollback and
+ *  signal a normal `{ ok: false }` response back to the caller. The bet's
+ *  status is re-checked from a row locked with `SELECT ... FOR UPDATE`
+ *  inside the transaction (not a pre-transaction snapshot), so this guards
+ *  correctly against two concurrent `cashOut` calls on the same bet both
+ *  reading `status: 'open'` and both crediting the wallet. */
+class BetNotActiveError extends Error {}
+
 const matchStatusSchema = z.enum(['upcoming', 'live', 'finished', 'postponed', 'cancelled']);
+
+const matchSnapshotInput = z.object({
+  id: z.string(),
+  status: matchStatusSchema,
+  score: z.object({ home: z.number(), away: z.number() }).optional(),
+  minute: z.number().optional(),
+  markets: z.array(
+    z.object({
+      key: z.string(),
+      suspended: z.boolean(),
+      outcomes: z.array(z.object({ code: z.string(), odds: z.number(), suspended: z.boolean().optional() })),
+    })
+  ),
+});
 
 const legInput = z.object({
   matchId: z.string(),
@@ -188,6 +212,79 @@ export const betsRouter = router({
       } catch (err) {
         if (err instanceof InsufficientBalanceError) {
           return { ok: false, error: `Insufficient balance. Available: ${err.available.toFixed(2)}` };
+        }
+        throw err;
+      }
+    }),
+
+  listBets: protectedProcedure.query(async ({ ctx }) => {
+    const bets = await ctx.db.bet.findMany({
+      where: { userId: ctx.currentUser.id },
+      orderBy: { placedAt: 'desc' },
+    });
+    return bets.map(mapBet);
+  }),
+
+  cashOut: protectedProcedure
+    .input(z.object({ betId: z.string(), portion: z.number().min(0).max(1), matches: z.array(matchSnapshotInput) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const amount = await ctx.db.$transaction(async (tx) => {
+          // Lock the bet row first (scoped to this user) so a concurrent
+          // cashOut on the same bet blocks here until the first commits,
+          // then its status/legs read below sees the first call's
+          // committed write instead of a stale pre-transaction snapshot.
+          // This is what prevents two concurrent cash-outs from both
+          // observing status 'open' and both crediting the wallet.
+          const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "Bet" WHERE "id" = ${input.betId} AND "userId" = ${ctx.currentUser.id} FOR UPDATE
+          `;
+          if (lockedRows.length === 0) throw new BetNotActiveError('Bet not found');
+
+          const row = await tx.bet.findFirst({ where: { id: input.betId, userId: ctx.currentUser.id } });
+          if (!row || row.status !== 'open') throw new BetNotActiveError('Bet not active');
+          const bet = mapBet(row);
+
+          const matchesById: Record<string, MatchCashoutInput> = {};
+          for (const m of input.matches) matchesById[m.id] = m;
+          const value = cashoutValue(bet, matchesById);
+          if (!value.available) throw new BetNotActiveError(value.reason || 'Cash out unavailable');
+
+          const amt = round2(value.amount * input.portion);
+
+          if (input.portion < 1) {
+            const cashoutHistory = [...(bet.cashoutHistory ?? []), { amount: amt, portion: input.portion, at: Date.now() }];
+            await tx.bet.update({
+              where: { id: bet.id },
+              data: {
+                stake: round2(bet.stake * (1 - input.portion)),
+                potential: round2(bet.potential * (1 - input.portion)),
+                cashoutHistory,
+              },
+            });
+          } else {
+            await tx.bet.update({
+              where: { id: bet.id },
+              data: { status: 'cashed_out', cashoutAmount: amt, payout: amt, settledAt: new Date() },
+            });
+          }
+          await tx.txn.create({
+            data: {
+              userId: ctx.currentUser.id,
+              type: 'cashout',
+              amount: amt,
+              status: 'success',
+              ref: `CO-${bet.bookingCode}`,
+              resolvedAt: new Date(),
+            },
+          });
+          return amt;
+        });
+
+        return { ok: true, amount };
+      } catch (err) {
+        if (err instanceof BetNotActiveError) {
+          return { ok: false, error: err.message || 'Bet not active' };
         }
         throw err;
       }
