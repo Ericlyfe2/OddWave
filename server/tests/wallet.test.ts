@@ -73,3 +73,57 @@ describe('wallet.listTxns', () => {
     expect(txns.every((t) => t.userId === txns[0].userId)).toBe(true);
   });
 });
+
+async function adminCaller() {
+  const caller = callerWithSession();
+  await caller.auth.signUp({ email: 'wallet-admin@example.com', password: 'correcthorse', phone: '+233200000009', fullName: 'Wallet Admin' });
+  await db.user.update({ where: { email: 'wallet-admin@example.com' }, data: { role: 'admin' } });
+  return caller;
+}
+
+describe('wallet.resolveWithdrawal', () => {
+  it('approving marks the txn successful with no refund', async () => {
+    const caller = await signedInCaller();
+    await caller.wallet.deposit({ amount: 100, provider: 'momo' });
+    const { txn } = await caller.wallet.requestWithdrawal({ amount: 40, momoNumber: '0244567890' });
+
+    const admin = await adminCaller();
+    await admin.wallet.resolveWithdrawal({ txnId: txn!.id, approve: true });
+
+    const txns = await caller.wallet.listTxns();
+    const resolved = txns.find((t) => t.id === txn!.id);
+    expect(resolved?.status).toBe('success');
+  });
+
+  it('rejecting marks the txn failed and refunds the amount', async () => {
+    const caller = await signedInCaller();
+    await caller.wallet.deposit({ amount: 100, provider: 'momo' });
+    const { txn } = await caller.wallet.requestWithdrawal({ amount: 40, momoNumber: '0244567890' });
+
+    const admin = await adminCaller();
+    await admin.wallet.resolveWithdrawal({ txnId: txn!.id, approve: false });
+
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.id === txn!.id)?.status).toBe('failed');
+    const refund = txns.find((t) => t.type === 'refund');
+    expect(refund?.amount).toBe(40);
+  });
+
+  it('rejects a non-admin caller', async () => {
+    const caller = await signedInCaller();
+    await caller.wallet.deposit({ amount: 100, provider: 'momo' });
+    const { txn } = await caller.wallet.requestWithdrawal({ amount: 40, momoNumber: '0244567890' });
+    await expect(caller.wallet.resolveWithdrawal({ txnId: txn!.id, approve: true })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('wallet.adminAdjust', () => {
+  it('creates an adjustment txn on the target user', async () => {
+    const caller = await signedInCaller();
+    const admin = await adminCaller();
+    await admin.wallet.adminAdjust({ userId: (await caller.auth.me())!.id, amount: 15, reason: 'goodwill' });
+
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.type === 'adjustment')?.amount).toBe(15);
+  });
+});

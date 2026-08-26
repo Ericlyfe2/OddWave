@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { protectedProcedure, router } from '../trpc';
+import { TRPCError } from '@trpc/server';
+import { adminProcedure, protectedProcedure, router } from '../trpc';
 import { mapTxn } from '../mappers';
 import { round2 } from '../../../src/lib/format';
 import type { Context } from '../context';
@@ -59,6 +60,48 @@ export const walletRouter = router({
     });
     return txns.map(mapTxn);
   }),
+
+  resolveWithdrawal: adminProcedure
+    .input(z.object({ txnId: z.string(), approve: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const txn = await ctx.db.txn.findUnique({ where: { id: input.txnId } });
+      if (!txn || txn.type !== 'withdrawal' || txn.status !== 'pending') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Withdrawal not found or already resolved' });
+      }
+      await ctx.db.$transaction(async (tx) => {
+        await tx.txn.update({ where: { id: txn.id }, data: { status: input.approve ? 'success' : 'failed', resolvedAt: new Date() } });
+        if (!input.approve) {
+          await tx.txn.create({
+            data: {
+              userId: txn.userId,
+              type: 'refund',
+              amount: Math.abs(Number(txn.amount)),
+              status: 'success',
+              ref: `REFUND-${txn.ref}`,
+              meta: { reason: 'Withdrawal rejected' },
+              resolvedAt: new Date(),
+            },
+          });
+        }
+      });
+      return { ok: true };
+    }),
+
+  adminAdjust: adminProcedure
+    .input(z.object({ userId: z.string(), amount: z.number(), reason: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const txn = await ctx.db.txn.create({
+        data: {
+          userId: input.userId,
+          type: 'adjustment',
+          amount: round2(input.amount),
+          status: 'success',
+          ref: `ADJ-${input.reason}`,
+          resolvedAt: new Date(),
+        },
+      });
+      return mapTxn(txn);
+    }),
 });
 
 export { balanceOf, lockedOf };
