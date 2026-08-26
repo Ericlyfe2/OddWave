@@ -4,7 +4,6 @@ import clsx from 'clsx';
 import { Gamepad2, Loader2, Trophy, Target, ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { useWallet } from '@/store/wallet';
-import { useNotifs } from '@/store/notifs';
 import { Button, EmptyState, ErrorBox, InfoNote } from '@/components/ui';
 import { PageTitle } from '@/components/pieces';
 import { money } from '@/lib/format';
@@ -20,15 +19,14 @@ const CORNERS: Array<{ id: Corner; label: string }> = [
 export function GamesScreen() {
   const navigate = useNavigate();
   const profile = useAuth((s) => s.profile);
-  const wallet = useWallet();
   const balance = useWallet((s) => (profile ? s.balanceOf(profile.id) : 0));
   const [stake, setStake] = useState('5');
   const [pick, setPick] = useState<Corner | null>(null);
   const [phase, setPhase] = useState<'idle' | 'shooting' | 'result'>('idle');
-  const [keeper, setKeeper] = useState<Corner>('L');
-  const [won, setWon] = useState(false);
+  const [keeper] = useState<Corner>('L');
+  const [won] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Array<{ pick: Corner; keeper: Corner; won: boolean }>>([]);
+  const [history] = useState<Array<{ pick: Corner; keeper: Corner; won: boolean }>>([]);
 
   const stakeNum = Number(stake) || 0;
   const payout = useMemo(() => Math.round(stakeNum * 2.4 * 100) / 100, [stakeNum]);
@@ -47,26 +45,17 @@ export function GamesScreen() {
   const shoot = async (corner: Corner) => {
     setError(null);
     if (!pick && corner !== null) setPick(corner);
-    const chosen = corner;
     if (stakeNum < 1) return setError('Minimum stake is 1 GH₵');
     if (stakeNum > balance) return setError(`Insufficient balance (${money(balance)})`);
 
-    setPhase('shooting');
-    wallet.applyStake(profile.id, stakeNum, `PK-${Date.now().toString(36).toUpperCase()}`, 0);
-
-    await new Promise((r) => setTimeout(r, 1100));
-    const keeperSide = CORNERS[Math.floor(Math.random() * 3)].id;
-    const scored = keeperSide !== chosen;
-    setKeeper(keeperSide);
-    setWon(scored);
-    setPhase('result');
-
-    const credit = useWallet.getState();
-    if (scored) {
-      credit.credit(profile.id, payout, 'payout', `PKWIN-${Date.now().toString(36).toUpperCase()}`);
-      useNotifs.getState().push({ userId: profile.id, kind: 'bet_won', title: 'Goal! Penalty Kings win', body: `${payout} credited to your wallet` }, profile.notifPrefs);
-    }
-    setHistory((h) => [{ pick: chosen, keeper: keeperSide, won: scored }, ...h].slice(0, 8));
+    // Phase 1b moved all wallet debits/credits server-side (bets.place /
+    // bets.settle / bets.cashOut); this mini-game has no server-side stake
+    // endpoint of its own yet, so real-money play is disabled here rather
+    // than silently skipping the stake deduction (which would let anyone
+    // win real payouts for a free stake) or corrupting the ledger with a
+    // client-only Txn the server never saw. See task-14-report.md.
+    setError('Penalty Kings is temporarily unavailable while wallet features move to the server.');
+    return;
   };
 
   const reset = () => {

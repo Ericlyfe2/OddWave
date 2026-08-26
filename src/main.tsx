@@ -6,7 +6,6 @@ import './index.css';
 import { useAuth } from '@/store/auth';
 import { useMatches } from '@/store/matches';
 import { useBets } from '@/store/bets';
-import { startWithdrawalAutoApprover } from '@/store/wallet';
 import { installBookingBridge } from '@/lib/bookingBridge';
 import { installSlipOwnerSync } from '@/store/slip';
 import { trpc, trpcClientConfig } from '@/lib/trpc';
@@ -19,7 +18,6 @@ async function boot() {
   useMatches.getState().init();
   // Settle open bets the moment the live engine finishes a match.
   useMatches.getState().onFinish((matchId) => useBets.getState().settleOnMatchFinish(matchId));
-  startWithdrawalAutoApprover();
   installBookingBridge();
   installSlipOwnerSync();
 

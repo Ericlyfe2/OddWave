@@ -162,7 +162,7 @@ export function DepositScreen() {
     setProcessing(true);
     await new Promise((r) => setTimeout(r, 1200));
     try {
-      wallet.deposit(profile.id, amt, provider.id, profile.notifPrefs);
+      await wallet.deposit(profile.id, amt, provider.id);
       setSuccess(true);
       toast('success', `Deposited ${money(amt)} ${CURRENCY}`);
       setTimeout(() => {
@@ -285,7 +285,7 @@ export function WithdrawScreen() {
 
     setProcessing(true);
     await new Promise((r) => setTimeout(r, 900));
-    const res = wallet.requestWithdrawal(profile.id, amt, momo);
+    const res = await wallet.requestWithdrawal(profile.id, amt, momo);
     setProcessing(false);
     if (res.error) return setError(res.error);
     setSuccess(true);

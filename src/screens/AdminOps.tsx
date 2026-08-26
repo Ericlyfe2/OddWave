@@ -4,10 +4,11 @@ import clsx from 'clsx';
 import { Check, X, UserCog, Coins, ShieldCheck, Ticket, Ban, Gift, Plus, Pencil, Trash2, EyeOff, Eye } from 'lucide-react';
 import { useWallet } from '@/store/wallet';
 import { useBets } from '@/store/bets';
+import { useAuth } from '@/store/auth';
 import { usePromotions, type PromotionInput } from '@/store/promotions';
 import type { Promotion, PromoKind } from '@/lib/types';
 import { money, timeAgoLabel } from '@/lib/format';
-import { trpc } from '@/lib/trpc';
+import { trpc, trpcClient } from '@/lib/trpc';
 import { Button, EmptyState, Modal } from '@/components/ui';
 
 type Tab = 'withdrawals' | 'users' | 'bets' | 'promotions';
@@ -56,6 +57,7 @@ export function AdminOps() {
 
 function WithdrawalsQueue() {
   const wallet = useWallet();
+  const profile = useAuth((s) => s.profile);
   const pending = wallet.pendingWithdrawals();
 
   if (pending.length === 0) {
@@ -86,11 +88,25 @@ function WithdrawalsQueue() {
               <Button
                 size="sm"
                 className="flex-1"
-                onClick={() => wallet.resolveWithdrawal(t.userId, t.id, true)}
+                onClick={async () => {
+                  await trpcClient.wallet.resolveWithdrawal.mutate({ txnId: t.id, approve: true });
+                  // listTxns is scoped to the signed-in user server-side — there's
+                  // no admin endpoint yet to refetch another user's ledger, so this
+                  // only refreshes the admin's own view, not the target user's.
+                  if (profile) await wallet.hydrate(profile.id);
+                }}
               >
                 <Check className="w-3.5 h-3.5" /> Approve
               </Button>
-              <Button size="sm" variant="outline" className="flex-1" onClick={() => wallet.resolveWithdrawal(t.userId, t.id, false)}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1"
+                onClick={async () => {
+                  await trpcClient.wallet.resolveWithdrawal.mutate({ txnId: t.id, approve: false });
+                  if (profile) await wallet.hydrate(profile.id);
+                }}
+              >
                 <X className="w-3.5 h-3.5" /> Reject & Refund
               </Button>
             </div>
@@ -111,6 +127,7 @@ function UsersAdmin() {
     onSuccess: () => utils.admin.listUsers.invalidate(),
   });
   const wallet = useWallet();
+  const profile = useAuth((s) => s.profile);
   const [adjusting, setAdjusting] = useState<string | null>(null);
   const [amount, setAmount] = useState('25');
 
@@ -149,10 +166,19 @@ function UsersAdmin() {
                 />
                 <Button
                   size="sm"
-                  onClick={() => {
+                  onClick={async () => {
                     const amt = Number(amount) || 0;
                     if (amt !== 0) {
-                      wallet.adminAdjust(p.id, amt, amt > 0 ? 'Admin credit adjustment' : 'Admin debit adjustment');
+                      await trpcClient.wallet.adminAdjust.mutate({
+                        userId: p.id,
+                        amount: amt,
+                        reason: amt > 0 ? 'Admin credit adjustment' : 'Admin debit adjustment',
+                      });
+                      // Same listTxns scoping limitation as the withdrawal queue above:
+                      // this refreshes the admin's own wallet state, not p.id's — the
+                      // Bal/Locked figures shown here for other users don't update live
+                      // until that user is hydrated (see UsersAdmin's known-gap note).
+                      if (profile) await wallet.hydrate(profile.id);
                     }
                     setAdjusting(null);
                   }}
