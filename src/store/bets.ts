@@ -83,7 +83,31 @@ export const useBets = create<BetsState>((set, get) => ({
   settleOnMatchFinish: async (matchId) => {
     const snapshot = liveEngine.get(matchId);
     if (!snapshot) return;
+    const before = get().bets;
     const result = await trpcClient.bets.settle.mutate({ match: snapshot });
-    if (result.settledCount > 0) await get().hydrate();
+    if (result.settledCount === 0) return;
+    await get().hydrate();
+
+    const profile = useAuth.getState().profile;
+    if (!profile) return;
+    const after = get().bets;
+
+    for (const bet of after) {
+      if (bet.userId !== profile.id) continue;
+      const prior = before.find((b) => b.id === bet.id);
+      if (!prior || prior.status !== 'open' || bet.status === 'open') continue;
+
+      if (typeof bet.payout === 'number' && bet.payout > 0) {
+        useNotifs.getState().push(
+          { userId: bet.userId, kind: 'bet_won', title: 'Bet won!', body: `${bet.bookingCode} paid out ${bet.payout.toFixed(2)}`, link: '/bets' },
+          profile.notifPrefs
+        );
+      } else {
+        useNotifs.getState().push(
+          { userId: bet.userId, kind: 'bet_lost', title: 'Bet settled', body: `${bet.bookingCode} did not win. Check details.`, link: '/bets' },
+          profile.notifPrefs
+        );
+      }
+    }
   },
 }));
