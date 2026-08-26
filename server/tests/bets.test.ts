@@ -235,3 +235,63 @@ describe('bets.settle', () => {
     expect(txns.filter((t) => t.type === 'payout')).toHaveLength(1);
   });
 });
+
+async function adminCaller() {
+  const caller = callerWithSession();
+  await caller.auth.signUp({ email: 'bets-admin@example.com', password: 'correcthorse', phone: '+233200000019', fullName: 'Bets Admin' });
+  await db.user.update({ where: { email: 'bets-admin@example.com' }, data: { role: 'admin' } });
+  return caller;
+}
+
+describe('bets.voidBet', () => {
+  it('refunds the stake and marks the bet void', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    const admin = await adminCaller();
+
+    await admin.bets.voidBet({ betId: placed.betIds![0], reason: 'trading_error' });
+
+    const bets = await caller.bets.listBets();
+    expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('void');
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.type === 'refund')?.amount).toBe(10);
+  });
+
+  it('rejects a non-admin caller', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    await expect(caller.bets.voidBet({ betId: placed.betIds![0], reason: 'x' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('refunds only stake minus usedBonus, not the full stake', async () => {
+    const caller = await signedInCaller();
+    await db.user.update({ where: { email: 'bets-user@example.com' }, data: { bonusBalance: 5 } });
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()], useBonus: 5 });
+    const admin = await adminCaller();
+
+    await admin.bets.voidBet({ betId: placed.betIds![0], reason: 'trading_error' });
+
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.type === 'refund')?.amount).toBe(5);
+  });
+
+  it('rejects double-refunding when two voidBet calls race on the same bet', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    const admin = await adminCaller();
+    // Two truly concurrent voidBet calls on the same open bet must not both
+    // observe status 'open': the row lock must serialize them so only one
+    // succeeds and only one refund Txn is created.
+    const results = await Promise.allSettled([
+      admin.bets.voidBet({ betId: placed.betIds![0], reason: 'a' }),
+      admin.bets.voidBet({ betId: placed.betIds![0], reason: 'b' }),
+    ]);
+
+    const bets = await caller.bets.listBets();
+    expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('void');
+    const txns = await caller.wallet.listTxns();
+    expect(txns.filter((t) => t.type === 'refund')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+  });
+});

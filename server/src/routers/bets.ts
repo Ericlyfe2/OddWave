@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
-import { protectedProcedure, router } from '../trpc';
+import { TRPCError } from '@trpc/server';
+import { adminProcedure, protectedProcedure, router } from '../trpc';
 import { round2 } from '../../../src/lib/format';
 import { LIMITS } from '../../../src/lib/limits';
 import { validateSlipSelections, validateStake, potentialFor } from '../../../src/lib/betsMath';
@@ -20,12 +21,13 @@ class InsufficientBalanceError extends Error {
   }
 }
 
-/** Thrown inside `cashOut`'s `$transaction` callback to abort/rollback and
- *  signal a normal `{ ok: false }` response back to the caller. The bet's
- *  status is re-checked from a row locked with `SELECT ... FOR UPDATE`
- *  inside the transaction (not a pre-transaction snapshot), so this guards
- *  correctly against two concurrent `cashOut` calls on the same bet both
- *  reading `status: 'open'` and both crediting the wallet. */
+/** Thrown inside `cashOut`'s (and `voidBet`'s) `$transaction` callback to
+ *  abort/rollback and signal an error back to the caller. The bet's status
+ *  is re-checked from a row locked with `SELECT ... FOR UPDATE` inside the
+ *  transaction (not a pre-transaction snapshot), so this guards correctly
+ *  against two concurrent calls on the same bet both reading
+ *  `status: 'open'` and both acting on it (crediting the wallet twice, or
+ *  double-refunding a void). */
 class BetNotActiveError extends Error {}
 
 const matchStatusSchema = z.enum(['upcoming', 'live', 'finished', 'postponed', 'cancelled']);
@@ -351,6 +353,51 @@ export const betsRouter = router({
         if (didSettle) settledCount += 1;
       }
       return { settledCount };
+    }),
+
+  voidBet: adminProcedure
+    .input(z.object({ betId: z.string(), reason: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await ctx.db.$transaction(async (tx) => {
+          // Lock the bet row first so a concurrent voidBet (or cashOut) on
+          // the same bet blocks here until the first commits, then the
+          // status read below sees that committed write instead of a stale
+          // pre-transaction snapshot. This is what prevents two concurrent
+          // voidBet calls from both observing status 'open' and both
+          // creating a refund Txn for the same bet.
+          const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "Bet" WHERE "id" = ${input.betId} FOR UPDATE
+          `;
+          if (lockedRows.length === 0) throw new BetNotActiveError('Bet not found or already settled');
+
+          const fresh = await tx.bet.findFirst({ where: { id: input.betId } });
+          if (!fresh || fresh.status !== 'open') throw new BetNotActiveError('Bet not found or already settled');
+          const bet = mapBet(fresh);
+          const refund = Math.max(0, bet.stake - (bet.usedBonus ?? 0));
+
+          await tx.bet.update({
+            where: { id: bet.id },
+            data: { status: 'void', payout: bet.stake, settledAt: new Date(), cashoutAmount: null },
+          });
+          await tx.txn.create({
+            data: {
+              userId: bet.userId,
+              type: 'refund',
+              amount: refund,
+              status: 'success',
+              ref: `VOID-${input.reason}`,
+              resolvedAt: new Date(),
+            },
+          });
+        });
+        return { ok: true };
+      } catch (err) {
+        if (err instanceof BetNotActiveError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: err.message });
+        }
+        throw err;
+      }
     }),
 });
 
