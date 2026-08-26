@@ -173,8 +173,8 @@ describe('validateSlipSelections', () => {
   it('rejects two outcomes from the same match in a system, the same way', () => {
     const res = validateSlipSelections(
       [
-        item({ matchId: 'm1', outcomeId: 'm1:1' }),
-        item({ matchId: 'm1', outcomeId: 'm1:2' }),
+        item({ matchId: 'm1', outcomeId: 'm1:1', outcomeCode: '1' }),
+        item({ matchId: 'm1', outcomeId: 'm1:2', outcomeCode: '2' }),
         item({ matchId: 'm2', outcomeId: 'm2:1' }),
       ],
       'system'
