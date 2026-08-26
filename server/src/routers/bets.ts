@@ -5,6 +5,7 @@ import { round2 } from '../../../src/lib/format';
 import { LIMITS } from '../../../src/lib/limits';
 import { validateSlipSelections, validateStake, potentialFor } from '../../../src/lib/betsMath';
 import { cashoutValue, type MatchCashoutInput } from '../../../src/lib/cashout';
+import { settleBetAgainstMatch, type MatchSettlementInput } from '../../../src/lib/settlement';
 import { mapBet } from '../mappers';
 import type { BetLeg } from '../../../src/lib/types';
 
@@ -288,6 +289,68 @@ export const betsRouter = router({
         }
         throw err;
       }
+    }),
+
+  settle: protectedProcedure
+    .input(z.object({ match: matchSnapshotInput }))
+    .mutation(async ({ ctx, input }) => {
+      const match: MatchSettlementInput = input.match;
+      // Candidate bets are found from an unlocked read (findMany + JS filter
+      // on the legs JSON, since matchId isn't queryable in SQL). That's fine
+      // for narrowing the candidate set, but each candidate's actual
+      // settlement below re-reads and re-locks its own row inside its own
+      // transaction rather than trusting this snapshot.
+      const open = await ctx.db.bet.findMany({ where: { status: 'open' } });
+      const relevant = open.filter((row) => (row.legs as unknown as BetLeg[]).some((l) => l.matchId === match.id));
+
+      let settledCount = 0;
+      for (const row of relevant) {
+        const didSettle = await ctx.db.$transaction(async (tx) => {
+          // Lock the bet row so a concurrent settle call for the same match
+          // (e.g. a duplicate match-finished event) or a concurrent cashOut
+          // on the same bet blocks here until the other commits, then the
+          // status read below sees that committed write instead of a stale
+          // pre-transaction snapshot. This is what prevents two concurrent
+          // settle calls from both observing status 'open' and both
+          // creating a payout Txn for the same bet.
+          const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id" FROM "Bet" WHERE "id" = ${row.id} FOR UPDATE
+          `;
+          if (lockedRows.length === 0) return false;
+
+          const fresh = await tx.bet.findFirst({ where: { id: row.id } });
+          if (!fresh || fresh.status !== 'open') return false;
+          const bet = mapBet(fresh);
+
+          const next = settleBetAgainstMatch(bet, match);
+          if (!next) return false;
+
+          await tx.bet.update({
+            where: { id: bet.id },
+            data: {
+              legs: next.legs as unknown as Prisma.InputJsonValue,
+              status: next.status,
+              payout: next.payout,
+              settledAt: next.status !== 'open' ? new Date() : undefined,
+            },
+          });
+          if (next.status !== 'open' && next.payout && next.payout > 0) {
+            await tx.txn.create({
+              data: {
+                userId: bet.userId,
+                type: 'payout',
+                amount: round2(next.payout),
+                status: 'success',
+                ref: `WIN-${bet.bookingCode}`,
+                resolvedAt: new Date(),
+              },
+            });
+          }
+          return true;
+        });
+        if (didSettle) settledCount += 1;
+      }
+      return { settledCount };
     }),
 });
 

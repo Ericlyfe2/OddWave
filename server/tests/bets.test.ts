@@ -196,3 +196,42 @@ describe('bets.cashOut', () => {
     expect(txns.filter((t) => t.type === 'cashout')).toHaveLength(1);
   });
 });
+
+describe('bets.settle', () => {
+  it('settles a won single and credits the payout', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+
+    await caller.bets.settle({
+      match: { id: 'm1', status: 'finished', score: { home: 1, away: 0 }, markets: [] },
+    });
+
+    const bets = await caller.bets.listBets();
+    expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('won');
+    const txns = await caller.wallet.listTxns();
+    expect(txns.find((t) => t.type === 'payout')?.amount).toBe(20);
+  });
+
+  it('ignores bets that reference a different match', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg({ matchId: 'other-match' })] });
+    await caller.bets.settle({ match: { id: 'm1', status: 'finished', score: { home: 1, away: 0 }, markets: [] } });
+    const bets = await caller.bets.listBets();
+    expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('open');
+  });
+
+  it('rejects double-crediting a payout when two settle calls race on the same match', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+    const match = { id: 'm1', status: 'finished' as const, score: { home: 1, away: 0 }, markets: [] };
+    // Two truly concurrent settle calls covering the same finished match must
+    // not both observe the bet's status as 'open': the row lock must
+    // serialize them so only one creates a payout Txn.
+    await Promise.all([caller.bets.settle({ match }), caller.bets.settle({ match })]);
+
+    const bets = await caller.bets.listBets();
+    expect(bets.find((b) => b.id === placed.betIds![0])?.status).toBe('won');
+    const txns = await caller.wallet.listTxns();
+    expect(txns.filter((t) => t.type === 'payout')).toHaveLength(1);
+  });
+});
