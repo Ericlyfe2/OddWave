@@ -1,5 +1,5 @@
 import { LIMITS } from './limits';
-import type { Bet, BetLeg, SlipItem } from './types';
+import type { Bet, BetLeg } from './types';
 import { round2 } from './format';
 
 export function accaBonusPct(picks: number): number {
