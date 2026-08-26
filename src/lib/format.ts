@@ -1,8 +1,6 @@
-import { CURRENCY } from './config';
-
-export function money(n: number, withSymbol = false): string {
+export function money(n: number, withSymbol = false, currency = 'GH₵'): string {
   const v = Math.abs(n) >= 10000 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return withSymbol ? `${CURRENCY} ${v}` : v;
+  return withSymbol ? `${currency} ${v}` : v;
 }
 
 export function oddsFmt(n: number): string {
