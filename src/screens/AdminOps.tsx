@@ -225,7 +225,6 @@ const VOID_REASONS = ['Suspicious activity', 'Trading error', 'Duplicate bet', '
 
 function BetsAdmin() {
   const bets = useBets((s) => s.bets);
-  const voidBet = useBets((s) => s.voidBet);
   const { data: profiles = [] } = trpc.admin.listUsers.useQuery();
   const profileById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
 
@@ -238,9 +237,10 @@ function BetsAdmin() {
   const [reason, setReason] = useState<string>(VOID_REASONS[0]);
   const targetBet = open.find((b) => b.id === target) ?? null;
 
-  const confirmVoid = () => {
+  const confirmVoid = async () => {
     if (!targetBet) return;
-    voidBet(targetBet.id, reason);
+    await trpcClient.bets.voidBet.mutate({ betId: targetBet.id, reason });
+    await useBets.getState().hydrate();
     setTarget(null);
   };
 

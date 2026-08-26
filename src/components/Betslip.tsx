@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { Trash2, X, Ticket, Zap, AlertTriangle, CheckCircle2, Loader2, Copy } from 'lucide-react';
-import type { BetLeg, SlipItem } from '@/lib/types';
+import type { SlipItem } from '@/lib/types';
 import { useSlip, slipTotals, type SlipMode } from '@/store/slip';
 import { useAuth } from '@/store/auth';
 import { useBets } from '@/store/bets';
@@ -13,6 +13,7 @@ import { money, oddsFmt } from '@/lib/format';
 import { Button, Segmented, EmptyState, ErrorBox } from './ui';
 import { generateBookingCode, loadBookingCode } from '@/lib/booking';
 import { validateSlipSelections } from '@/lib/betsMath';
+import { liveEngine } from '@/lib/liveEngine';
 
 function SlipSelectionRow({ item }: { item: SlipItem }) {
   const remove = useSlip((s) => s.remove);
@@ -227,18 +228,26 @@ export function SlipPanel({ onPlaced }: { onPlaced?: () => void }) {
       return;
     }
 
-    const legs: BetLeg[] = items.map((i) => ({
-      matchId: i.matchId,
-      matchName: i.matchName,
-      leagueName: i.leagueName,
-      marketKey: i.marketKey,
-      marketName: i.marketName,
-      outcomeCode: i.outcomeCode,
-      outcomeLabel: i.outcomeLabel,
-      odds: i.odds,
-      kickoff: i.kickoff,
-      status: 'open',
-    }));
+    const legs = items.map((i) => {
+      const match = liveEngine.get(i.matchId);
+      const market = match?.markets.find((mk) => mk.key === i.marketKey);
+      const outcome = market?.outcomes.find((o) => o.code === i.outcomeCode);
+      return {
+        matchId: i.matchId,
+        matchName: i.matchName,
+        leagueName: i.leagueName,
+        marketKey: i.marketKey,
+        marketName: i.marketName,
+        outcomeCode: i.outcomeCode,
+        outcomeLabel: i.outcomeLabel,
+        odds: i.odds,
+        kickoff: i.kickoff,
+        status: 'open' as const,
+        matchStatus: match?.status ?? 'cancelled',
+        marketSuspended: market?.suspended ?? true,
+        outcomeSuspended: outcome?.suspended ?? true,
+      };
+    });
 
     const result = await placeBet({
       type: mode,

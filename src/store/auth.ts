@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { DeviceSession, Profile } from '@/lib/types';
 import { trpcClient } from '@/lib/trpc';
 import { useWallet } from '@/store/wallet';
+import { useBets } from '@/store/bets';
 
 interface AuthState {
   profile: Profile | null;
@@ -34,7 +35,10 @@ export const useAuth = create<AuthState>((set) => ({
     try {
       const profile = await trpcClient.auth.me.query();
       set({ profile, ready: true });
-      if (profile) await useWallet.getState().hydrate(profile.id);
+      if (profile) {
+        await useWallet.getState().hydrate(profile.id);
+        await useBets.getState().hydrate();
+      }
     } catch {
       set({ profile: null, ready: true });
     }
@@ -45,6 +49,7 @@ export const useAuth = create<AuthState>((set) => ({
     if ('error' in result) return { error: result.error };
     set({ profile: result.profile });
     await useWallet.getState().hydrate(result.profile.id);
+    await useBets.getState().hydrate();
     return {};
   },
 
@@ -53,6 +58,7 @@ export const useAuth = create<AuthState>((set) => ({
     if ('error' in result) return { error: result.error };
     set({ profile: result.profile });
     await useWallet.getState().hydrate(result.profile.id);
+    await useBets.getState().hydrate();
     return {};
   },
 
@@ -60,6 +66,7 @@ export const useAuth = create<AuthState>((set) => ({
     await trpcClient.auth.signOut.mutate();
     set({ profile: null });
     useWallet.getState().clear();
+    useBets.getState().clear();
   },
 
   updateProfile: async (patch) => {
