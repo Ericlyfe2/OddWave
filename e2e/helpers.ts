@@ -38,9 +38,17 @@ export async function signOut(page: Page): Promise<void> {
  */
 export async function readBalance(page: Page): Promise<number> {
   const res = await page.request.get('/api/wallet.listTxns?batch=1&input=%7B%7D');
+  if (!res.ok()) throw new Error(`readBalance: /api/wallet.listTxns returned ${res.status()}`);
   const body = await res.json();
-  const txns: Array<{ status: string; amount: number }> = body[0]?.result?.data ?? [];
-  return Math.round(txns.filter((t) => t.status === 'success').reduce((sum, t) => sum + t.amount, 0) * 100) / 100;
+  const txns: unknown = body[0]?.result?.data;
+  if (!Array.isArray(txns)) throw new Error(`readBalance: unexpected response shape: ${JSON.stringify(body)}`);
+  return (
+    Math.round(
+      (txns as Array<{ status: string; amount: number }>)
+        .filter((t) => t.status === 'success')
+        .reduce((sum, t) => sum + t.amount, 0) * 100
+    ) / 100
+  );
 }
 
 /** Funds the wallet through the deposit screen so bets can actually be placed. */

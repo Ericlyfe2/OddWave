@@ -243,6 +243,24 @@ async function adminCaller() {
   return caller;
 }
 
+describe('bets.listOpenBets', () => {
+  it('rejects a non-admin caller', async () => {
+    const caller = await signedInCaller();
+    await expect(caller.bets.listOpenBets()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('shows an open bet belonging to a different user', async () => {
+    const caller = await signedInCaller();
+    const placed = await caller.bets.place({ type: 'single', stakePerCombo: 10, legs: [openLeg()] });
+
+    const admin = await adminCaller();
+    const open = await admin.bets.listOpenBets();
+    const bet = open.find((b) => b.id === placed.betIds![0]);
+    expect(bet).toBeDefined();
+    expect(bet!.userId).not.toBe((await admin.auth.me())!.id);
+  });
+});
+
 describe('bets.voidBet', () => {
   it('refunds the stake and marks the bet void', async () => {
     const caller = await signedInCaller();

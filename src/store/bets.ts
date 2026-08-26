@@ -54,7 +54,7 @@ export const useBets = create<BetsState>((set, get) => ({
       // refetch, so the balance shown anywhere in the app would stay stale
       // until whatever next incidentally hydrates it (the withdrawal poller,
       // up to 15s later).
-      await useWallet.getState().hydrate(profile.id);
+      await useWallet.getState().hydrate(profile.id).catch(() => undefined);
       useNotifs.getState().push(
         { userId: profile.id, kind: 'bet_placed', title: 'Bet placed successfully', body: `Booking code sent` },
         profile.notifPrefs
@@ -78,7 +78,7 @@ export const useBets = create<BetsState>((set, get) => ({
 
     const profile = useAuth.getState().profile;
     if (profile) {
-      await useWallet.getState().hydrate(profile.id);
+      await useWallet.getState().hydrate(profile.id).catch(() => undefined);
       useNotifs.getState().push(
         { userId: profile.id, kind: 'cashout', title: 'Cash out successful', body: `${result.amount!.toFixed(2)} credited to your wallet` },
         profile.notifPrefs
@@ -98,7 +98,7 @@ export const useBets = create<BetsState>((set, get) => ({
 
     const profile = useAuth.getState().profile;
     if (!profile) return;
-    await useWallet.getState().hydrate(profile.id);
+    await useWallet.getState().hydrate(profile.id).catch(() => undefined);
     const after = get().bets;
 
     for (const bet of after) {

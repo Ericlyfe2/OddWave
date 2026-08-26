@@ -117,6 +117,24 @@ describe('wallet.resolveWithdrawal', () => {
   });
 });
 
+describe('wallet.listPendingWithdrawals', () => {
+  it('rejects a non-admin caller', async () => {
+    const caller = await signedInCaller();
+    await expect(caller.wallet.listPendingWithdrawals()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('shows a pending withdrawal belonging to a different user', async () => {
+    const caller = await signedInCaller();
+    await caller.wallet.deposit({ amount: 100, provider: 'momo' });
+    const { txn } = await caller.wallet.requestWithdrawal({ amount: 40, momoNumber: '0244567890' });
+
+    const admin = await adminCaller();
+    const pending = await admin.wallet.listPendingWithdrawals();
+    expect(pending.find((t) => t.id === txn!.id)?.userId).toBe(txn!.userId);
+    expect(pending.find((t) => t.id === txn!.id)?.userId).not.toBe((await admin.auth.me())!.id);
+  });
+});
+
 describe('wallet.adminAdjust', () => {
   it('creates an adjustment txn on the target user', async () => {
     const caller = await signedInCaller();

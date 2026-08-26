@@ -110,7 +110,18 @@ test.describe('notification preferences', () => {
     const adminPage = await adminContext.newPage();
     await signIn(adminPage, DEMO_ADMIN);
     await adminPage.goto('/admin?tab=withdrawals');
-    await adminPage.getByRole('button', { name: /Approve/ }).first().click();
+    // listPendingWithdrawals is cross-user and ordered oldest-first, so
+    // `.first()` can approve a DIFFERENT pending withdrawal left over from
+    // another test (e.g. booking-and-wallet.spec.ts's own request, which
+    // only auto-approves after a real 2-minute delay) instead of the 30
+    // GH₵ request this test just created. Scope the click to that specific
+    // card by its displayed amount.
+    const card = adminPage.locator('div.rounded-xl').filter({ hasText: '30.00' });
+    await card.getByRole('button', { name: /Approve/ }).click();
+    // Wait for the mutation + refetch to actually land (the card leaving the
+    // pending list) before tearing down the context — closing immediately
+    // after the click can abort the in-flight request.
+    await expect(card).toHaveCount(0);
     await adminContext.close();
 
     // Poll the actual write target instead of guessing a fixed sleep long
