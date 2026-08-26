@@ -29,6 +29,8 @@ model User {
   rgLimits   RgLimits?
   notifPrefs NotificationPrefs?
   sessions   DeviceSession[]
+  txns  Txn[]
+  bets  Bet[]
 }
 
 model RgLimits {
@@ -66,4 +68,43 @@ model VerificationCode {
   createdAt DateTime @default(now())
 
   @@index([userId, purpose])
+}
+
+model Txn {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String    // deposit | withdrawal | stake | payout | cashout | bonus | refund | adjustment
+  amount     Decimal   @db.Decimal(12, 2)
+  status     String    // pending | success | failed
+  ref        String
+  meta       Json?
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([userId, createdAt])
+}
+
+model Bet {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookingCode    String
+  type           String    // single | multi | system | builder
+  stake          Decimal   @db.Decimal(12, 2)
+  totalOdds      Decimal   @db.Decimal(10, 3)
+  potential      Decimal   @db.Decimal(12, 2)
+  comboCount     Int?
+  systemConfig   Json?
+  legs           Json
+  status         String    // open | won | lost | cashed_out | void
+  payout         Decimal?  @db.Decimal(12, 2)
+  cashoutAmount  Decimal?  @db.Decimal(12, 2)
+  cashoutHistory Json?
+  usedBonus      Decimal   @default(0) @db.Decimal(12, 2)
+  placedAt       DateTime  @default(now())
+  settledAt      DateTime?
+
+  @@index([userId, placedAt])
+  @@index([bookingCode])
 }
