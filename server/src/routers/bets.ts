@@ -4,8 +4,18 @@ import { protectedProcedure, router } from '../trpc';
 import { round2 } from '../../../src/lib/format';
 import { LIMITS } from '../../../src/lib/limits';
 import { validateSlipSelections, validateStake, potentialFor } from '../../../src/lib/betsMath';
-import { balanceOf } from './wallet';
 import type { BetLeg } from '../../../src/lib/types';
+
+/** Thrown inside the `$transaction` callback to abort/rollback and signal
+ *  "insufficient balance" back out to the caller as a normal `{ ok: false }`
+ *  response rather than an unhandled error. The balance is re-read from the
+ *  transaction client (not the pre-transaction snapshot) so this check races
+ *  correctly against concurrent `place` calls on the same user. */
+class InsufficientBalanceError extends Error {
+  constructor(public available: number) {
+    super('Insufficient balance');
+  }
+}
 
 const matchStatusSchema = z.enum(['upcoming', 'live', 'finished', 'postponed', 'cancelled']);
 
@@ -78,16 +88,6 @@ export const betsRouter = router({
         return { ok: false, error: `Maximum payout is ${LIMITS.maxPayout.toLocaleString()}` };
       }
 
-      const [available, user] = await Promise.all([
-        balanceOf(ctx.db, ctx.currentUser.id),
-        ctx.db.user.findUnique({ where: { id: ctx.currentUser.id } }),
-      ]);
-      const bonusToUse = Math.min(round2(useBonus), Number(user?.bonusBalance ?? 0), totalStake);
-      const cashNeeded = round2(totalStake - bonusToUse);
-      if (cashNeeded > available) {
-        return { ok: false, error: `Insufficient balance. Available: ${available.toFixed(2)}` };
-      }
-
       const bookingCode = newBookingCode();
       const storedLegs: BetLeg[] = legs.map((l) => ({
         matchId: l.matchId,
@@ -102,66 +102,95 @@ export const betsRouter = router({
         status: 'open',
       }));
 
-      const rows: Array<{ legs: BetLeg[]; stake: number; totalOdds: number; potential: number; usedBonus: number }> =
-        type === 'single'
-          ? storedLegs.map((leg, idx) => ({
-              legs: [leg],
-              stake: stakeVal,
-              totalOdds: round2(leg.odds),
-              potential: round2(stakeVal * leg.odds),
-              usedBonus: idx === 0 ? bonusToUse : 0,
-            }))
-          : [
-              {
-                legs: storedLegs,
-                stake: totalStake,
-                totalOdds: totals.totalOdds,
-                potential: totals.potential,
-                usedBonus: bonusToUse,
-              },
-            ];
+      try {
+        const betIds = await ctx.db.$transaction(async (tx) => {
+          // Lock the user row first so concurrent `place` calls for the same
+          // user serialize on this statement: a second call blocks here
+          // until the first commits, then its balance/bonus reads below see
+          // the first call's committed Txn/User writes (fresh per-statement
+          // read under Postgres's default Read Committed isolation) instead
+          // of a stale pre-transaction snapshot. This is what prevents two
+          // concurrent bets from both passing the balance check and
+          // overdrawing the wallet.
+          const lockedUsers = await tx.$queryRaw<Array<{ bonusBalance: unknown }>>`
+            SELECT "bonusBalance" FROM "User" WHERE "id" = ${ctx.currentUser.id} FOR UPDATE
+          `;
+          const currentBonusBalance = Number(lockedUsers[0]?.bonusBalance ?? 0);
 
-      const betIds = await ctx.db.$transaction(async (tx) => {
-        const ids: string[] = [];
-        for (const row of rows) {
-          const bet = await tx.bet.create({
+          const successTxns = await tx.txn.findMany({ where: { userId: ctx.currentUser.id, status: 'success' } });
+          const available = round2(successTxns.reduce((sum, t) => sum + Number(t.amount), 0));
+
+          const bonusToUse = Math.min(round2(useBonus), currentBonusBalance, totalStake);
+          const cashNeeded = round2(totalStake - bonusToUse);
+          if (cashNeeded > available) {
+            throw new InsufficientBalanceError(available);
+          }
+
+          const rows: Array<{ legs: BetLeg[]; stake: number; totalOdds: number; potential: number; usedBonus: number }> =
+            type === 'single'
+              ? storedLegs.map((leg, idx) => ({
+                  legs: [leg],
+                  stake: stakeVal,
+                  totalOdds: round2(leg.odds),
+                  potential: round2(stakeVal * leg.odds),
+                  usedBonus: idx === 0 ? bonusToUse : 0,
+                }))
+              : [
+                  {
+                    legs: storedLegs,
+                    stake: totalStake,
+                    totalOdds: totals.totalOdds,
+                    potential: totals.potential,
+                    usedBonus: bonusToUse,
+                  },
+                ];
+
+          const ids: string[] = [];
+          for (const row of rows) {
+            const bet = await tx.bet.create({
+              data: {
+                id: newBetId(),
+                userId: ctx.currentUser.id,
+                bookingCode,
+                type,
+                stake: row.stake,
+                totalOdds: row.totalOdds,
+                potential: row.potential,
+                comboCount: type === 'system' ? totals.comboCount : undefined,
+                systemConfig: type === 'system' ? { picksPerCombo: picksForSystem } : undefined,
+                legs: row.legs as unknown as Prisma.InputJsonValue,
+                status: 'open',
+                usedBonus: row.usedBonus,
+              },
+            });
+            ids.push(bet.id);
+          }
+          await tx.txn.create({
             data: {
-              id: newBetId(),
               userId: ctx.currentUser.id,
-              bookingCode,
-              type,
-              stake: row.stake,
-              totalOdds: row.totalOdds,
-              potential: row.potential,
-              comboCount: type === 'system' ? totals.comboCount : undefined,
-              systemConfig: type === 'system' ? { picksPerCombo: picksForSystem } : undefined,
-              legs: row.legs as unknown as Prisma.InputJsonValue,
-              status: 'open',
-              usedBonus: row.usedBonus,
+              type: 'stake',
+              amount: -cashNeeded,
+              status: 'success',
+              ref: bookingCode,
+              meta: bonusToUse > 0 ? { bonusUsed: bonusToUse } : undefined,
             },
           });
-          ids.push(bet.id);
-        }
-        await tx.txn.create({
-          data: {
-            userId: ctx.currentUser.id,
-            type: 'stake',
-            amount: -cashNeeded,
-            status: 'success',
-            ref: bookingCode,
-            meta: bonusToUse > 0 ? { bonusUsed: bonusToUse } : undefined,
-          },
+          if (bonusToUse > 0) {
+            await tx.user.update({
+              where: { id: ctx.currentUser.id },
+              data: { bonusBalance: round2(currentBonusBalance - bonusToUse) },
+            });
+          }
+          return ids;
         });
-        if (bonusToUse > 0) {
-          await tx.user.update({
-            where: { id: ctx.currentUser.id },
-            data: { bonusBalance: round2(Number(user!.bonusBalance) - bonusToUse) },
-          });
-        }
-        return ids;
-      });
 
-      return { ok: true, betIds };
+        return { ok: true, betIds };
+      } catch (err) {
+        if (err instanceof InsufficientBalanceError) {
+          return { ok: false, error: `Insufficient balance. Available: ${err.available.toFixed(2)}` };
+        }
+        throw err;
+      }
     }),
 });
 

@@ -96,11 +96,11 @@ describe('bets.place', () => {
     expect(txns.find((t) => t.type === 'stake')?.amount).toBe(-5);
   });
 
-  it('does not create a Bet row if the transaction fails partway (atomicity)', async () => {
+  it('rejects the request entirely — and writes nothing — when validation fails before any DB write', async () => {
     const caller = await signedInCaller();
-    // A stake that clears the balance check but exceeds LIMITS.maxPayout
-    // fails the potential-payout check *after* the balance check passes,
-    // proving nothing was written before that point.
+    // A stake whose potential payout exceeds LIMITS.maxPayout fails that
+    // pre-transaction check and returns before `$transaction` is ever
+    // entered, so no Bet row (or Txn) should exist afterward.
     const result = await caller.bets.place({
       type: 'single',
       stakePerCombo: 90,
@@ -109,5 +109,23 @@ describe('bets.place', () => {
     expect(result.ok).toBe(false);
     const bets = await db.bet.findMany({ where: { userId: (await caller.auth.me())!.id } });
     expect(bets).toHaveLength(0);
+  });
+
+  it('rejects both concurrent requests rather than overdrawing when two place calls race on the same balance', async () => {
+    const caller = await signedInCaller();
+    // Balance is 100. Two concurrent single bets at 60 each would both pass
+    // a balance check taken from a stale pre-transaction read, overdrawing
+    // to -20. The balance must be re-verified inside the transaction so at
+    // most one of the two succeeds.
+    const [a, b] = await Promise.all([
+      caller.bets.place({ type: 'single', stakePerCombo: 60, legs: [openLeg()] }),
+      caller.bets.place({ type: 'single', stakePerCombo: 60, legs: [openLeg({ matchId: 'm2' })] }),
+    ]);
+    const results = [a, b];
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toHaveLength(1);
+    const txns = await caller.wallet.listTxns();
+    const stakeTotal = txns.filter((t) => t.type === 'stake').reduce((sum, t) => sum + t.amount, 0);
+    expect(stakeTotal).toBe(-60);
   });
 });
