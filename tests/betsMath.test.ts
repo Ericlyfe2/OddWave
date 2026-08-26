@@ -161,8 +161,8 @@ describe('validateSlipSelections', () => {
   it('rejects two outcomes from the same match in a multi (mutually exclusive, e.g. Arsenal win + Chelsea win)', () => {
     const res = validateSlipSelections(
       [
-        item({ matchId: 'm1', outcomeId: 'm1:1', outcomeLabel: 'Arsenal' }),
-        item({ matchId: 'm1', outcomeId: 'm1:2', outcomeLabel: 'Chelsea' }),
+        item({ matchId: 'm1', outcomeId: 'm1:1', outcomeCode: '1', outcomeLabel: 'Arsenal' }),
+        item({ matchId: 'm1', outcomeId: 'm1:2', outcomeCode: '2', outcomeLabel: 'Chelsea' }),
       ],
       'multi'
     );

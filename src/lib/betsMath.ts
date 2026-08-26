@@ -19,7 +19,16 @@ export interface ValidationResult {
   error?: string;
 }
 
-export function validateSlipSelections(items: SlipItem[], mode: 'single' | 'multi' | 'system' | 'builder'): ValidationResult {
+export interface Selection {
+  matchId: string;
+  matchName: string;
+  marketKey: string;
+  marketName: string;
+  outcomeCode: string;
+  odds: number;
+}
+
+export function validateSlipSelections(items: Selection[], mode: 'single' | 'multi' | 'system' | 'builder'): ValidationResult {
   if (items.length === 0) return { ok: false, error: 'Add at least one selection' };
   if (mode === 'multi' && items.length < 2) return { ok: false, error: 'Multi bets need at least 2 selections' };
   if (mode === 'builder') {
@@ -40,8 +49,9 @@ export function validateSlipSelections(items: SlipItem[], mode: 'single' | 'mult
   if (suspended.length > 0) return { ok: false, error: 'Some selections are unavailable' };
   const seen = new Set<string>();
   for (const i of items) {
-    if (seen.has(i.outcomeId)) return { ok: false, error: 'Duplicate selection found' };
-    seen.add(i.outcomeId);
+    const key = `${i.matchId}:${i.marketKey}:${i.outcomeCode}`;
+    if (seen.has(key)) return { ok: false, error: 'Duplicate selection found' };
+    seen.add(key);
   }
   // Outside Bet Builder, two outcomes from the same event can't be combined
   // into one accumulator/system line — they're frequently mutually exclusive
